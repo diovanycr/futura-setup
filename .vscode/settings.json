@@ -1,0 +1,8 @@
+{
+    "python.analysis.extraPaths": [
+        "${workspaceFolder}",
+        "${workspaceFolder}/ui",
+        "${workspaceFolder}/core",
+        "${workspaceFolder}/.venv/Lib/site-packages"
+    ]
+}

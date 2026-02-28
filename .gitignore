@@ -1,19 +1,15 @@
-# Python
+# Ambientes virtuais (se você criou um)
+venv/
+.venv/
+
+# Cache do Python
 __pycache__/
 *.py[cod]
-*$py.class
 
-# PyInstaller / Build
+# Pastas de build e executáveis
 build/
 dist/
 *.spec
 
-# Portable Python e Ambientes Virtuais
+# A antiga pasta que você não quer mais
 python_portable/
-venv/
-env/
-.env
-
-# OS generated files
-.DS_Store
-Thumbs.db
