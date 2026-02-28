@@ -1,0 +1,93 @@
+============================================================
+  FUTURA SETUP — GUIA DE TROCA DE SENHA
+============================================================
+
+
+COMO FUNCIONA
+-------------
+A senha é armazenada como hash SHA256 no arquivo main.py.
+A senha real nunca fica salva em texto legível — apenas
+sua "impressão digital" criptográfica.
+
+  - Senha correta         → app abre normalmente
+  - Senha errada (1x/2x) → mostra tentativas restantes
+  - 3 erros seguidos      → bloqueio de 30 segundos
+  - Fechar sem autenticar → app fecha
+
+
+============================================================
+  PASSO A PASSO
+============================================================
+
+PASSO 1 — Escolha a nova senha
+-------------------------------
+Defina a senha que deseja usar.
+Exemplo: minhasenha123
+
+[!] Evite caracteres como aspas ( " ' ) na senha.
+
+
+PASSO 2 — Gere o hash SHA256
+------------------------------
+Abra o CMD na pasta do projeto e execute:
+
+  python_portable\python.exe -c "import hashlib; print(hashlib.sha256(b'minhasenha123').hexdigest())"
+
+Substitua minhasenha123 pela sua senha.
+
+O resultado será um código assim:
+  7b4e8e2a1c3f9d0b6a2e5f8c1d4b7e0a3f6c9e2b5a8d1f4c7e0b3a6d9f2c5e8b1
+
+[!] Copie esse hash — você vai precisar no próximo passo.
+
+
+PASSO 3 — Abra o main.py
+--------------------------
+Abra o arquivo main.py em qualquer editor de texto
+(Bloco de Notas, VS Code, Notepad++, etc.).
+
+
+PASSO 4 — Localize a linha do hash
+------------------------------------
+Use Ctrl+F e busque por:
+
+  _SENHA_HASH =
+
+Você verá algo como:
+
+  _SENHA_HASH = "941222350ef4fc6b932bb0a8ae5282a70936d7c2a73bb0b2ca1b69e42171de1f"  # senha padrão: futura2024
+
+
+PASSO 5 — Substitua o hash
+----------------------------
+Apague o hash antigo e cole o novo. Atualize o comentário
+no final da linha para lembrar a senha definida. Exemplo:
+
+  _SENHA_HASH = "7b4e8e2a1c3f9d0b6a2e5f8c..."  # senha: minhasenha123
+
+
+PASSO 6 — Salve e recompile
+-----------------------------
+Salve o main.py e execute:
+
+  build.bat
+
+O novo FuturaSetup.exe na pasta dist já estará com a nova senha.
+
+
+============================================================
+  REFERÊNCIA RÁPIDA
+============================================================
+
+Senha padrão:  futura2024
+Hash padrão:   941222350ef4fc6b932bb0a8ae5282a70936d7c2a73bb0b2ca1b69e42171de1f
+
+Comando para gerar hash de qualquer senha:
+
+  python_portable\python.exe -c "import hashlib; print(hashlib.sha256(b'SUA_SENHA').hexdigest())"
+
+Substitua SUA_SENHA pela senha desejada.
+
+============================================================
+  Futura Setup v4.3.0 — Documento interno — Equipe de TI
+============================================================

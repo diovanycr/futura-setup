@@ -1,0 +1,94 @@
+# =============================================================================
+# FUTURA SETUP — Configurações Centralizadas
+# Todas as constantes e URLs em um só lugar para fácil manutenção
+# =============================================================================
+
+# ── VERSÃO ────────────────────────────────────────────────────────────────────
+
+APP_VERSION = "4.3.0"
+
+# ── URLs DO REPOSITÓRIO ───────────────────────────────────────────────────────
+
+# ATENÇÃO: _URL_BASE_FISICA é o caminho físico no servidor de repositório.
+# Se esse caminho mudar, atualize aqui — as URLs abaixo são geradas a partir dele.
+_REPO_BASE   = "https://repositorio.futurasistemas.com.br"
+_REPO_FISICA = "D:/Backup//repositorio//"
+
+URL_DLLS = (
+    f"{_REPO_BASE}/download.php"
+    f"?dirfisico={_REPO_FISICA}01%20-%20DLLs%20Sistema/atual/32/DLLx86.zip"
+    f"&caminho={_REPO_BASE}/repositorio/01%20-%20DLLs%20Sistema/atual/32/DLLx86.zip"
+    f"&filename=DLLx86.zip"
+)
+
+URL_ATUALIZADOR = (
+    f"{_REPO_BASE}/download.php"
+    f"?dirfisico={_REPO_FISICA}00%20-%20Atualizador/Atualizador.exe"
+    f"&caminho={_REPO_BASE}/repositorio/00%20-%20Atualizador/Atualizador.exe"
+    f"&filename=Atualizador.exe"
+)
+
+# Hosts usados para testar conectividade antes de downloads
+CONNECTIVITY_HOSTS = [
+    "repositorio.futurasistemas.com.br",
+    "www.google.com",
+    "8.8.8.8",
+]
+
+# ── INSTALAÇÃO ────────────────────────────────────────────────────────────────
+
+# EXEs conhecidos do Futura, em ordem de prioridade
+EXES_CONHECIDOS = [
+    ("PDV.exe",          "Sistema PDV (Frente de Caixa)"),
+    ("FuturaServer.exe", "Servidor Futura"),
+    ("Cadastro.exe",     "Sistema de Cadastros"),
+    ("Retaguarda.exe",   "Sistema Retaguarda"),
+    ("Gerencial.exe",    "Sistema Gerencial"),
+]
+
+# Número máximo de backups mantidos por pasta
+MAX_BACKUPS = 5
+
+# Espaço mínimo em MB antes de emitir aviso
+ESPACO_MIN_MB = 500
+
+# Tentativas máximas de download (rede pode estar instável)
+MAX_TENTATIVAS_DOWNLOAD = 3
+
+# Tentativas máximas de cópia de arquivo (disco pode estar ocupado)
+MAX_TENTATIVAS_COPIA = 3
+
+# ── FIREBIRD ──────────────────────────────────────────────────────────────────
+
+# Versões suportadas e bases de instalação — adicionar novas versões aqui
+_FB_BASES    = [r"C:\Program Files", r"C:\Program Files (x86)"]
+_FB_VERSOES  = ["Firebird_5_0", "Firebird_4_0", "Firebird_3_0"]
+
+FIREBIRD_CONF_PATHS = [
+    rf"{base}\Firebird\{ver}\databases.conf"
+    for base in _FB_BASES
+    for ver in _FB_VERSOES
+]
+
+FIREBIRD_SERVICES = [
+    "FirebirdServerDefaultInstance",
+    "FirebirdGuardianDefaultInstance",
+]
+
+# ── REDE ──────────────────────────────────────────────────────────────────────
+
+# Share que identifica um servidor Futura válido
+FUTURA_SHARE_NAME = "Futura"
+
+# Arquivos que confirmam que é um servidor Futura legítimo
+FUTURA_MARKER_FILES = ["Futura.ini", "FuturaServer.exe"]
+
+# ── PASTAS PADRÃO ─────────────────────────────────────────────────────────────
+
+PASTAS_INSTALACAO_PADRAO = [
+    "C:\\FUTURA",
+    "C:\\FuturaTerminal",
+]
+
+# Subpasta de backups dentro da instalação
+BACKUP_SUBDIR = "Backup_Atualizacao"

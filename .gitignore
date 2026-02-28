@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyInstaller / Build
+build/
+dist/
+*.spec
+
+# Portable Python e Ambientes Virtuais
+python_portable/
+venv/
+env/
+.env
+
+# OS generated files
+.DS_Store
+Thumbs.db
