@@ -128,7 +128,7 @@ def _force_taskbar_icon(window: QMainWindow):
 # e substitua o valor abaixo.
 # Senha padrão: futura2024
 # =============================================================================
-_SENHA_HASH = "3fe1f7584833183e2da842b2f18123186919d4aa9828dbebdb3956429d9607bb"  # senha: 131313
+_SENHA_HASH = "1cfafff6d51a03662b85b93dc3417f51687034ba9a46682f5328257eff7133ed"  # senha: 1313
 
 _LOGIN_MAX_TENTATIVAS = 3
 _LOGIN_BLOQUEIO_SEG   = 30
