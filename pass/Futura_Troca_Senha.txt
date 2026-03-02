@@ -31,7 +31,7 @@ PASSO 2 — Gere o hash SHA256
 ------------------------------
 Abra o CMD na pasta do projeto e execute:
 
-  python_portable\python.exe -c "import hashlib; print(hashlib.sha256(b'minhasenha123').hexdigest())"
+  python -c "import hashlib; print(hashlib.sha256(b'minhasenha123').hexdigest())"
 
 Substitua minhasenha123 pela sua senha.
 
@@ -70,7 +70,7 @@ PASSO 6 — Salve e recompile
 -----------------------------
 Salve o main.py e execute:
 
-  build.bat
+  build_system.bat
 
 O novo FuturaSetup.exe na pasta dist já estará com a nova senha.
 
@@ -84,7 +84,7 @@ Hash padrão:   941222350ef4fc6b932bb0a8ae5282a70936d7c2a73bb0b2ca1b69e42171de1f
 
 Comando para gerar hash de qualquer senha:
 
-  python_portable\python.exe -c "import hashlib; print(hashlib.sha256(b'SUA_SENHA').hexdigest())"
+  python -c "import hashlib; print(hashlib.sha256(b'SUA_SENHA').hexdigest())"
 
 Substitua SUA_SENHA pela senha desejada.
 
