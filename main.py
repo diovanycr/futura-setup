@@ -1,17 +1,5 @@
 # =============================================================================
 # FUTURA SETUP v4.3.0 -- Main Window
-# Melhorias v2:
-#   - IS_ADMIN: calculado uma vez no módulo (não duas vezes em runtime)
-#   - _get_active_workers: lógica de inspeção de workers centralizada
-#   - closeEvent: usa _show_guard (sem duplicar cálculo de posição do diálogo)
-#   - import set_theme movido para o topo (sem import tardio em main())
-#   - _WORKER_PAGES: propriedade com as páginas que têm worker
-# Melhorias v3:
-#   - _worker_pages: adicionado _page_restaurar (corrige closeEvent que não
-#     detectava RestauracaoWorker em andamento — bug silencioso de perda de dados)
-# Melhorias v4:
-#   - _force_taskbar_icon: força ícone via WinAPI (HWND) após window.show()
-#     evita que o Windows reverta para o ícone do python.exe durante execução
 # =============================================================================
 
 import sys
@@ -32,25 +20,22 @@ from PyQt6.QtGui import QFont, QIcon
 from ui.theme import COLORS, FONT_SANS, FONT_MONO, get_stylesheet, set_theme
 from ui.theme_manager import theme_manager
 from ui.widgets import spacer, h_line, WorkerGuardDialog
-from ui.page_menu        import PageMenu
-from ui.page_scan        import PageScan
-from ui.page_atalhos     import PageAtalhos
-from ui.page_terminal    import PageTerminal
-from ui.page_restaurar   import PageRestaurar
-from ui.page_log         import PageLog
-from ui.page_atualizacao  import PageAtualizacao
-from ui.page_backup_gbak  import PageBackupGbak
-from ui.page_port_opener  import PagePortOpener
-from ui.page_diagnostico  import PageDiagnostico
-from core.logger          import log
-from config              import APP_VERSION
+from ui.page_menu               import PageMenu
+from ui.page_scan               import PageScan
+from ui.page_atalhos            import PageAtalhos
+from ui.page_terminal           import PageTerminal
+from ui.page_restaurar          import PageRestaurar
+from ui.page_log                import PageLog
+from ui.page_atualizacao        import PageAtualizacao
+from ui.page_backup_gbak        import PageBackupGbak
+from ui.page_port_opener        import PagePortOpener
+from ui.page_diagnostico        import PageDiagnostico
+from ui.page_editar_funcionario import PageEditarFuncionario
+from core.logger                import log
+from config                     import APP_VERSION
 
 # =============================================================================
 def _app_icon() -> QIcon:
-    """Retorna o ícone da aplicação.
-    - Dev:  ao lado do main.py
-    - .exe: dentro do bundle (_MEIPASS) e ao lado do .exe
-    """
     candidates = []
     if getattr(sys, 'frozen', False):
         candidates.append(os.path.join(sys._MEIPASS, 'futura.ico'))
@@ -64,7 +49,6 @@ def _app_icon() -> QIcon:
 
 
 def _app_icon_path() -> str:
-    """Retorna o caminho absoluto do futura.ico (para uso com WinAPI)."""
     if getattr(sys, 'frozen', False):
         candidates = [
             os.path.join(sys._MEIPASS, 'futura.ico'),
@@ -81,16 +65,6 @@ def _app_icon_path() -> str:
 
 
 def _force_taskbar_icon(window: QMainWindow):
-    """
-    Força o ícone na taskbar via WinAPI direto na HWND da janela.
-
-    O Qt no modo portable (python.exe) às vezes reverte o ícone da taskbar
-    para o ícone do python.exe quando a janela recebe o primeiro foco.
-    Chamar SendMessage(WM_SETICON) diretamente na HWND impede essa reversão
-    porque bypassa completamente a camada Qt e fala com o Windows diretamente.
-
-    Deve ser chamado APÓS window.show() para que a HWND já exista.
-    """
     if sys.platform != "win32":
         return
     ico_path = _app_icon_path()
@@ -99,35 +73,19 @@ def _force_taskbar_icon(window: QMainWindow):
     try:
         import ctypes
         hwnd = int(window.winId())
-        # Carrega o .ico em dois tamanhos: 256x256 (big) e 16x16 (small)
         hicon_big = ctypes.windll.user32.LoadImageW(
-            None, ico_path,
-            1,        # IMAGE_ICON
-            256, 256,
-            0x00000010  # LR_LOADFROMFILE
+            None, ico_path, 1, 256, 256, 0x00000010
         )
         hicon_small = ctypes.windll.user32.LoadImageW(
-            None, ico_path,
-            1,
-            16, 16,
-            0x00000010
+            None, ico_path, 1, 16, 16, 0x00000010
         )
         WM_SETICON = 0x0080
-        ICON_SMALL = 0
-        ICON_BIG   = 1
-        ctypes.windll.user32.SendMessageW(hwnd, WM_SETICON, ICON_BIG,   hicon_big)
-        ctypes.windll.user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, hicon_small)
+        ctypes.windll.user32.SendMessageW(hwnd, WM_SETICON, 1, hicon_big)
+        ctypes.windll.user32.SendMessageW(hwnd, WM_SETICON, 0, hicon_small)
     except Exception:
         pass
 # =============================================================================
 
-# =============================================================================
-# SENHA DE ACESSO
-# Para trocar a senha, gere um novo hash SHA256:
-#   python -c "import hashlib; print(hashlib.sha256(b'sua_senha').hexdigest())"
-# e substitua o valor abaixo.
-# Senha padrão: futura2024
-# =============================================================================
 _SENHA_HASH = "1cfafff6d51a03662b85b93dc3417f51687034ba9a46682f5328257eff7133ed"  # senha: 1313
 
 _LOGIN_MAX_TENTATIVAS = 3
@@ -135,8 +93,6 @@ _LOGIN_BLOQUEIO_SEG   = 30
 
 
 class LoginDialog(QDialog):
-    """Diálogo de senha exibido antes da janela principal."""
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Futura Setup — Acesso")
@@ -224,10 +180,8 @@ class LoginDialog(QDialog):
     def _verificar(self):
         if self._bloqueado:
             return
-
         senha = self._campo.text()
         hash_digitado = hashlib.sha256(senha.encode()).hexdigest()
-
         if hash_digitado == _SENHA_HASH:
             self._autenticado = True
             self.accept()
@@ -235,7 +189,6 @@ class LoginDialog(QDialog):
             self._tentativas += 1
             restam = _LOGIN_MAX_TENTATIVAS - self._tentativas
             self._campo.clear()
-
             if self._tentativas >= _LOGIN_MAX_TENTATIVAS:
                 self._bloquear()
             else:
@@ -249,7 +202,6 @@ class LoginDialog(QDialog):
         self._campo.setEnabled(False)
         self._btn.setEnabled(False)
         self._tempo_restante = _LOGIN_BLOQUEIO_SEG
-
         self._timer = QTimer(self)
         self._timer.setInterval(1000)
         self._timer.timeout.connect(self._tick_bloqueio)
@@ -262,7 +214,6 @@ class LoginDialog(QDialog):
             f"Muitas tentativas. Aguarde {self._tempo_restante}s para tentar novamente."
         )
         self._tempo_restante -= 1
-
         if self._tempo_restante < 0:
             self._timer.stop()
             self._bloqueado   = False
@@ -277,8 +228,6 @@ class LoginDialog(QDialog):
         return self._autenticado
 
 
-# Calculado uma vez no startup — evita chamar ctypes.windll duas vezes
-# (no log do __init__ e no footer do Sidebar)
 import ctypes as _ctypes
 try:
     IS_ADMIN: bool = bool(_ctypes.windll.shell32.IsUserAnAdmin())
@@ -336,21 +285,13 @@ class NavItem(QWidget):
 
     def _upd(self, _mode: str = ""):
         if self._busy:
-            self._set_styles(
-                COLORS["accent_dim"], COLORS["warn"], COLORS["warn"], "600"
-            )
+            self._set_styles(COLORS["accent_dim"], COLORS["warn"], COLORS["warn"], "600")
         elif self._active:
-            self._set_styles(
-                COLORS["accent_dim"], COLORS["accent"], COLORS["accent"], "600"
-            )
+            self._set_styles(COLORS["accent_dim"], COLORS["accent"], COLORS["accent"], "600")
         elif not self._enabled:
-            self._set_styles(
-                "transparent", "transparent", COLORS["text_disabled"]
-            )
+            self._set_styles("transparent", "transparent", COLORS["text_disabled"])
         else:
-            self._set_styles(
-                "transparent", "transparent", COLORS["text_mid"]
-            )
+            self._set_styles("transparent", "transparent", COLORS["text_mid"])
 
     def set_active(self, v: bool):
         self._active = v
@@ -364,7 +305,6 @@ class NavItem(QWidget):
         self._upd()
 
     def set_busy(self, v: bool):
-        """Ativa/desativa o indicador de operação em andamento (spinner no ícone)."""
         self._busy = v
         if hasattr(self, "_icon_lbl"):
             if v:
@@ -375,7 +315,6 @@ class NavItem(QWidget):
         self._upd()
 
     def _spin_tick(self):
-        """Avança um frame do spinner — chamado pelo MainWindow a cada 200ms."""
         if self._busy and hasattr(self, "_icon_lbl"):
             self._spin_frame = (self._spin_frame + 1) % len(self._spin_frames)
             self._icon_lbl.setText(self._spin_frames[self._spin_frame])
@@ -465,10 +404,6 @@ class ThemeToggleBtn(QWidget):
 # ── FOOTER WIDGET ─────────────────────────────────────────────────────────────
 
 class FooterWidget(QWidget):
-    """
-    Rodapé da sidebar com status de admin e versão.
-    Extraído de Sidebar._build_footer para facilitar manutenção.
-    """
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setStyleSheet("background: transparent;")
@@ -555,16 +490,16 @@ class Sidebar(QWidget):
         inner_lay.addWidget(self.nav_atualizacao)
 
         inner_lay.addWidget(NavSectionLabel("Utilitários"))
-        self.nav_log         = NavItem("Ver Log",          "≡")
-        self.nav_restaurar   = NavItem("Restaurar Backup", "↺")
-        self.nav_backup_gbak = NavItem("Backup/Restaure DB", "💾")
-        self.nav_port_opener = NavItem("Firewall — Portas",  "🔓")
-        self.nav_diagnostico = NavItem("Diagnóstico",        "🔍")
+        self.nav_log          = NavItem("Ver Log",             "≡")
+        self.nav_backup_gbak  = NavItem("Backup/Restaure DB", "💾")
+        self.nav_port_opener  = NavItem("Firewall — Portas",  "🔓")
+        self.nav_diagnostico  = NavItem("Diagnóstico",        "🔍")
+        self.nav_editar_func  = NavItem("Editar Funcionário", "✏️")
         inner_lay.addWidget(self.nav_log)
-        inner_lay.addWidget(self.nav_restaurar)
         inner_lay.addWidget(self.nav_backup_gbak)
         inner_lay.addWidget(self.nav_port_opener)
         inner_lay.addWidget(self.nav_diagnostico)
+        inner_lay.addWidget(self.nav_editar_func)
 
         self.nav_atalhos.set_enabled(False)
         self.nav_terminal.set_enabled(False)
@@ -586,8 +521,9 @@ class Sidebar(QWidget):
 
         self._all = [
             self.nav_menu, self.nav_atalhos, self.nav_terminal,
-            self.nav_atualizacao, self.nav_log, self.nav_restaurar,
-            self.nav_backup_gbak, self.nav_port_opener, self.nav_diagnostico
+            self.nav_atualizacao, self.nav_log,
+            self.nav_backup_gbak, self.nav_port_opener, self.nav_diagnostico,
+            self.nav_editar_func,
         ]
 
         self._upd()
@@ -630,6 +566,7 @@ _IDX_ATUALIZACAO = 6
 _IDX_BACKUP_GBAK = 7
 _IDX_PORT_OPENER = 8
 _IDX_DIAGNOSTICO = 9
+_IDX_EDITAR_FUNC = 10
 
 
 class MainWindow(QMainWindow):
@@ -652,28 +589,30 @@ class MainWindow(QMainWindow):
         self._stack = QStackedWidget()
         root.addWidget(self._stack)
 
-        self._page_menu        = PageMenu()
-        self._page_scan        = PageScan()
-        self._page_atalhos     = PageAtalhos()
-        self._page_terminal    = PageTerminal()
-        self._page_restaurar   = PageRestaurar()
-        self._page_log         = PageLog()
-        self._page_atualizacao = PageAtualizacao()
-        self._page_backup_gbak = PageBackupGbak()
-        self._page_port_opener = PagePortOpener()
-        self._page_diagnostico = PageDiagnostico()
+        self._page_menu         = PageMenu()
+        self._page_scan         = PageScan()
+        self._page_atalhos      = PageAtalhos()
+        self._page_terminal     = PageTerminal()
+        self._page_restaurar    = PageRestaurar()
+        self._page_log          = PageLog()
+        self._page_atualizacao  = PageAtualizacao()
+        self._page_backup_gbak  = PageBackupGbak()
+        self._page_port_opener  = PagePortOpener()
+        self._page_diagnostico  = PageDiagnostico()
+        self._page_editar_func  = PageEditarFuncionario()
 
         for p in [
-            self._page_menu,        # 0
-            self._page_scan,        # 1
-            self._page_atalhos,     # 2
-            self._page_terminal,    # 3
-            self._page_restaurar,   # 4
-            self._page_log,         # 5
-            self._page_atualizacao, # 6
-            self._page_backup_gbak, # 7
-            self._page_port_opener, # 8
-            self._page_diagnostico, # 9
+            self._page_menu,         # 0
+            self._page_scan,         # 1
+            self._page_atalhos,      # 2
+            self._page_terminal,     # 3
+            self._page_restaurar,    # 4
+            self._page_log,          # 5
+            self._page_atualizacao,  # 6
+            self._page_backup_gbak,  # 7
+            self._page_port_opener,  # 8
+            self._page_diagnostico,  # 9
+            self._page_editar_func,  # 10
         ]:
             self._stack.addWidget(p)
 
@@ -698,15 +637,16 @@ class MainWindow(QMainWindow):
         self._page_backup_gbak.go_menu.connect(self._go_menu)
         self._page_port_opener.go_menu.connect(self._go_menu)
         self._page_diagnostico.go_menu.connect(self._go_menu)
+        self._page_editar_func.go_menu.connect(self._go_menu)
 
         # ── Sidebar clicks ──
         self._sidebar.nav_menu.on_click(lambda: self._navigate(self._go_menu))
         self._sidebar.nav_log.on_click(lambda: self._navigate(self._go_log))
-        self._sidebar.nav_restaurar.on_click(lambda: self._navigate(self._go_restaurar))
         self._sidebar.nav_atualizacao.on_click(lambda: self._navigate(self._go_atualizacao))
         self._sidebar.nav_backup_gbak.on_click(lambda: self._navigate(self._go_backup_gbak))
         self._sidebar.nav_port_opener.on_click(lambda: self._navigate(self._go_port_opener))
         self._sidebar.nav_diagnostico.on_click(lambda: self._navigate(self._go_diagnostico))
+        self._sidebar.nav_editar_func.on_click(lambda: self._navigate(self._go_editar_func))
         self._sidebar.nav_atalhos.on_click(
             lambda: self._navigate(
                 lambda: self._show(_IDX_ATALHOS, self._sidebar.nav_atalhos)
@@ -725,7 +665,6 @@ class MainWindow(QMainWindow):
         self._flow_mode   = None
         self._close_guard = False
 
-        # ── Timer de spinner para indicador de busy na sidebar ──
         self._busy_timer = QTimer(self)
         self._busy_timer.setInterval(200)
         self._busy_timer.timeout.connect(self._spin_tick)
@@ -769,6 +708,7 @@ class MainWindow(QMainWindow):
             self._page_restaurar,
             self._page_backup_gbak,
             self._page_port_opener,
+            self._page_editar_func,
         ]
 
     def _get_active_workers(self) -> list:
@@ -796,9 +736,9 @@ class MainWindow(QMainWindow):
                 self._page_atalhos:     self._sidebar.nav_atalhos,
                 self._page_terminal:    self._sidebar.nav_terminal,
                 self._page_atualizacao: self._sidebar.nav_atualizacao,
-                self._page_restaurar:   self._sidebar.nav_restaurar,
                 self._page_backup_gbak: self._sidebar.nav_backup_gbak,
                 self._page_port_opener: self._sidebar.nav_port_opener,
+                self._page_editar_func: self._sidebar.nav_editar_func,
             }
         return self._page_nav_map
 
@@ -840,7 +780,7 @@ class MainWindow(QMainWindow):
 
     def _go_restaurar(self):
         self._page_restaurar.load_backups()
-        self._show(_IDX_RESTAURAR, self._sidebar.nav_restaurar)
+        self._show(_IDX_RESTAURAR, self._sidebar.nav_menu)
 
     def _go_atualizacao(self):
         self._page_atualizacao.reset()
@@ -857,6 +797,10 @@ class MainWindow(QMainWindow):
     def _go_diagnostico(self):
         self._page_diagnostico.reset()
         self._show(_IDX_DIAGNOSTICO, self._sidebar.nav_diagnostico)
+
+    def _go_editar_func(self):
+        self._page_editar_func.reset()
+        self._show(_IDX_EDITAR_FUNC, self._sidebar.nav_editar_func)
 
     def _start_atalhos(self):
         self._flow_mode = "atalhos"
@@ -901,7 +845,6 @@ def main():
         lambda mode: app.setStyleSheet(get_stylesheet(mode))
     )
 
-    # ── Tela de login ──
     login = LoginDialog()
     login.setWindowIcon(icon)
     login.exec()
@@ -912,10 +855,6 @@ def main():
     window.setWindowIcon(icon)
     window.show()
 
-    # ── Força ícone via WinAPI direto na HWND ────────────────────────────────
-    # Chamado APÓS show() para garantir que a HWND já existe.
-    # Isso impede que o Windows reverta para o ícone do python.exe quando a
-    # janela recebe o primeiro foco (comportamento comum no modo portable).
     _force_taskbar_icon(window)
 
     sys.exit(app.exec())

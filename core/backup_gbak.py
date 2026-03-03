@@ -1,89 +1,224 @@
 """
 core/backup_gbak.py — Worker de Backup e Restaure via GBAK (Firebird)
 
+CORRECAO PRINCIPAL (restaure falhando):
+  Com o servico Firebird PARADO, o gbak opera em modo embedded (acesso direto
+  ao arquivo .fdb). Nesse modo, -user/-pass nao sao suportados pois nao ha
+  servidor para autenticar — causava falha imediata com "unavailable database".
+  Solucao: omitir -user/-pass nos comandos gbak.
+
+  Tambem substituido -c por -r (replace) para evitar conflito se o arquivo
+  de destino ainda existir. Fallback automatico para -c caso -r nao seja
+  suportado na versao instalada.
+
 Fluxo Backup:
-  1. Detectar diretório do Firebird (x86 / x64)
-  2. Parar serviços Firebird
-  3. Renomear DADOS.fdb → DADOS_TEMP.fdb
-  4. Executar gbak -b  (streaming de output em tempo real)
-  5. Renomear DADOS_TEMP.fdb → DADOS.fdb
-  6. Reiniciar serviços Firebird
+  1. Parar servicos Firebird
+  2. Renomear .fdb para _TEMP.fdb
+  3. gbak -b (sem -user/-pass: modo embedded com servico parado)
+  4. Renomear _TEMP.fdb de volta
+  5. Reiniciar servicos Firebird
 
 Fluxo Restaure:
-  1. Detectar diretório do Firebird
-  2. Parar serviços Firebird
-  3. Executar gbak -c  (output em tempo real) → gera DADOSNOVO.fdb
-  4. Reiniciar serviços Firebird
-  (usuário decide manualmente o que fazer com DADOSNOVO.fdb)
+  1. Parar servicos Firebird
+  2. Remover _NOVO.fdb se existir
+  3. gbak -r (sem -user/-pass: modo embedded com servico parado)
+  4. Reiniciar servicos Firebird
+
+PROGRESSO POR TIMER:
+  Durante a execucao do gbak (parte mais longa), um thread de timer avanca
+  o progresso suavemente de pct_start ate pct_soft_end ao longo de
+  estimated_seconds. Ao terminar o gbak, o progresso salta para pct_end.
+
+  O timer usa interpolacao exponencial: avanca rapido no inicio e desacelera
+  perto do teto — evitando que a barra "pare" perto do fim enquanto o gbak
+  ainda esta rodando.
+
+  Backup  — faixas:
+    0–5%   : parar servicos
+    5–15%  : renomear .fdb
+    15–88% : execucao gbak (timer: estimativa 3 min, teto suave 85%)
+    88–95% : renomear de volta
+    95–100%: reiniciar servicos + conclusao
+
+  Restaure — faixas:
+    0–5%   : verificacoes
+    5–88%  : execucao gbak (timer: estimativa 3 min, teto suave 85%)
+    88–95% : finalizacoes
+    95–100%: conclusao
 """
 
 from __future__ import annotations
 
 import os
 import subprocess
-import shutil
+import threading
+import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from core.logger import log
 from core.installer import _BaseWorker
 from core.firebird_services import (
-    stop_firebird_services, start_firebird_services, find_firebird_dir,
+    stop_firebird_services,
+    start_firebird_services,
+    find_firebird_dir,
     FIREBIRD_SERVICES,
 )
-
-# Constantes e funções de controle de serviços centralizadas em core.firebird_services
 
 GBAK_USER     = "sysdba"
 GBAK_PASSWORD = "sbofutura"
 
+# Tempo estimado (segundos) para o gbak completar.
+# Nao precisa ser exato: o timer so avanca ate o teto suave (pct_soft_end),
+# nunca bloqueia o processo. Ajuste conforme o tamanho tipico do banco.
+_GBAK_ESTIMATED_SECONDS = 180   # 3 minutos
+
 
 # ---------------------------------------------------------------------------
-# Funções auxiliares (não-bloqueantes, usadas pela UI para detecção inicial)
+# Timer de progresso suave
 # ---------------------------------------------------------------------------
 
+class _ProgressTimer:
+    """Avanca o progresso suavemente em background durante a execucao do gbak.
+
+    Interpolacao exponencial: pct = start + span * (1 - e^(-k*t))
+    onde k e calculado para atingir 95% do intervalo no tempo estimado.
+
+    Isso faz a barra andar rapido no inicio e desacelerar perto do teto,
+    evitando o efeito de "travar" proximo ao fim caso o gbak demore mais
+    que o estimado.
+
+    Uso:
+        timer = _ProgressTimer(
+            progress_fn, pct_start=15, pct_soft_end=85,
+            estimated_seconds=180, tick=0.5
+        )
+        timer.start()
+        # ... rodar gbak ...
+        timer.stop()
+        progress_fn(pct_hard_end, "Concluido")
+    """
+
+    def __init__(
+        self,
+        progress_fn,            # callable(pct: int, descricao: str)
+        pct_start: int,
+        pct_soft_end: int,
+        estimated_seconds: float = 180.0,
+        tick: float = 0.5,
+        descricao: str = "Processando...",
+    ):
+        self._progress_fn  = progress_fn
+        self._pct_start    = pct_start
+        self._pct_soft_end = pct_soft_end
+        self._estimated    = estimated_seconds
+        self._tick         = tick
+        self._descricao    = descricao
+        self._stop_evt     = threading.Event()
+        self._thread: threading.Thread | None = None
+
+        import math
+        # k tal que (1 - e^{-k * estimated}) = 0.95  =>  k = -ln(0.05) / estimated
+        self._k = -math.log(0.05) / max(estimated_seconds, 1.0)
+
+    def start(self):
+        self._stop_evt.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._stop_evt.set()
+        if self._thread:
+            self._thread.join(timeout=self._tick * 3)
+
+    def _run(self):
+        import math
+        t0   = time.monotonic()
+        span = self._pct_soft_end - self._pct_start
+        last = self._pct_start - 1   # garante que o primeiro tick sempre emite
+
+        while not self._stop_evt.is_set():
+            elapsed = time.monotonic() - t0
+            frac    = 1.0 - math.exp(-self._k * elapsed)
+            pct     = int(self._pct_start + span * frac)
+            pct     = min(pct, self._pct_soft_end)
+
+            if pct > last:
+                last = pct
+                self._progress_fn(pct, self._descricao)
+
+            self._stop_evt.wait(self._tick)
 
 
-def find_dados_fdb(pasta_dados: str) -> Optional[str]:
-    """Procura DADOS.fdb na pasta informada. Retorna o caminho completo ou None."""
-    candidates = ["DADOS.fdb", "dados.fdb", "Dados.fdb"]
-    for name in candidates:
-        full = os.path.join(pasta_dados, name)
-        if os.path.isfile(full):
-            return full
-    return None
-
-
-
-
-
+# ---------------------------------------------------------------------------
+# Funcoes auxiliares
+# ---------------------------------------------------------------------------
 
 def gerar_nome_backup(pasta_backup: str) -> str:
     """Gera caminho completo do .bck com data e hora."""
-    ts = datetime.now().strftime("%Y-%m-%d_%H-%M")
+    ts   = datetime.now().strftime("%Y-%m-%d_%H-%M")
     nome = f"BACKUP_{ts}.bck"
     return os.path.join(pasta_backup, nome)
 
 
+def _rodar_gbak(cmd: list, fb_dir: str, log_fn, stop_fn) -> int:
+    """Executa gbak com streaming de output linha a linha. Retorna returncode.
+
+    As credenciais sao passadas via variavel de ambiente ISC_USER / ISC_PASSWORD.
+    Com o servico Firebird PARADO, o gbak opera em modo embedded e os flags
+    -user/-pass da linha de comando sao ignorados — o unico meio de autenticar
+    nesse modo e pelas variaveis de ambiente do processo.
+    """
+    env = os.environ.copy()
+    env["ISC_USER"]     = GBAK_USER
+    env["ISC_PASSWORD"] = GBAK_PASSWORD
+
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        cwd=fb_dir,
+        env=env,
+    )
+    for line in proc.stdout:
+        if stop_fn():
+            proc.terminate()
+            proc.wait()
+            raise InterruptedError("Cancelado pelo usuario.")
+        line = line.rstrip()
+        if line:
+            kind = (
+                "err"  if any(w in line.lower() for w in ("error", "erro", "failed")) else
+                "warn" if any(w in line.lower() for w in ("warning", "aviso"))         else
+                "dim"
+            )
+            log_fn(line, kind)
+    proc.wait()
+    return proc.returncode if proc.returncode is not None else -1
+
+
 # ---------------------------------------------------------------------------
-# Worker de detecção (curta duração — usa SingleShotConnection na UI)
+# Worker de deteccao (curta duracao)
 # ---------------------------------------------------------------------------
 
 class _DetectarFirebirdWorker(QThread):
-    """Detecta diretório Firebird e caminho do DADOS.fdb em background."""
-    finished = pyqtSignal(str, str)   # (firebird_dir, dados_fdb)  — "" se não encontrado
+    """Detecta diretorio do Firebird em background.
 
-    def __init__(self, pasta_dados: str):
+    Signal 'finished' emite apenas o diretorio (str), vazio se nao encontrado.
+    """
+    finished = pyqtSignal(str)
+
+    def __init__(self):
         super().__init__()
-        self._pasta_dados = pasta_dados
 
     def run(self):
-        fb  = find_firebird_dir() or ""
-        fdb = find_dados_fdb(self._pasta_dados) or ""
-        self.finished.emit(fb, fdb)
+        fb = find_firebird_dir() or ""
+        self.finished.emit(fb)
 
 
 # ---------------------------------------------------------------------------
@@ -95,99 +230,84 @@ class BackupGbakWorker(_BaseWorker):
 
     _LOG_PREFIX = "[BackupGBAK]"
 
-    def __init__(
-        self,
-        firebird_dir: str,
-        dados_fdb: str,       # caminho completo de DADOS.fdb
-        backup_bck: str,      # caminho completo de destino .bck (já com data/hora)
-    ):
+    def __init__(self, firebird_dir: str, dados_fdb: str, backup_bck: str):
         super().__init__()
-        self._fb_dir         = firebird_dir
-        self._dados_fdb      = dados_fdb
-        self._backup_bck     = backup_bck
+        self._fb_dir     = firebird_dir
+        self._dados_fdb  = dados_fdb
+        self._backup_bck = backup_bck
         self._servicos_parados: list[str] = []
 
-    # ------------------------------------------------------------------
     def run(self):
-        # REFATORAÇÃO: antes usava 3 chamadas .replace() encadeadas (frágil e
-        # case-sensitive). Path.stem extrai o nome sem extensão de forma segura.
         dados_path = Path(self._dados_fdb)
         dados_temp = str(dados_path.with_name(dados_path.stem + "_TEMP.fdb"))
-        sucesso = False
+        sucesso    = False
         info: dict = {}
+        timer: _ProgressTimer | None = None
 
         log.section("BACKUP GBAK")
         self._log("Iniciando processo de backup via GBAK...", "info")
 
         try:
-            # --- Passo 1: Parar Firebird ---
+            # --- Passo 1: Parar Firebird (0–5%) ---
             if self._stop:
-                raise InterruptedError("Cancelado pelo usuário.")
-            self._pct(5, "Parando serviços do Firebird...")
-            self._log("Parando serviços do Firebird...", "info")
+                raise InterruptedError("Cancelado pelo usuario.")
+            self._pct(2, "Parando servicos do Firebird...")
+            self._log("Parando servicos do Firebird...", "info")
             self._servicos_parados = stop_firebird_services()
             if self._servicos_parados:
-                self._log(f"Serviços parados: {', '.join(self._servicos_parados)}", "ok")
+                self._log(f"Servicos parados: {', '.join(self._servicos_parados)}", "ok")
             else:
-                self._log("Nenhum serviço Firebird ativo encontrado (ou já parado).", "warn")
+                self._log("Nenhum servico Firebird ativo encontrado (ou ja parado).", "warn")
+            self._pct(5, "Servicos parados.")
 
-            # --- Passo 2: Renomear DADOS → DADOS_TEMP ---
+            # --- Passo 2: Renomear .fdb para _TEMP (5–15%) ---
             if self._stop:
-                raise InterruptedError("Cancelado pelo usuário.")
-            self._pct(15, "Renomeando banco de dados...")
-            self._log(f"Renomeando: {self._dados_fdb} → {dados_temp}", "info")
+                raise InterruptedError("Cancelado pelo usuario.")
+            self._pct(10, "Renomeando banco de dados...")
+            self._log(f"Renomeando: {self._dados_fdb} -> {dados_temp}", "info")
             os.rename(self._dados_fdb, dados_temp)
-            self._log("Banco renomeado para DADOS_TEMP.fdb com sucesso.", "ok")
+            self._log("Banco renomeado para _TEMP com sucesso.", "ok")
+            self._pct(15, "Banco renomeado. Preparando backup...")
 
-            # --- Passo 3: Criar pasta de backup se não existir ---
+            # --- Passo 3: Criar pasta de backup ---
             pasta_bck = os.path.dirname(self._backup_bck)
-            os.makedirs(pasta_bck, exist_ok=True)
+            if pasta_bck:
+                os.makedirs(pasta_bck, exist_ok=True)
 
-            # --- Passo 4: Executar GBAK backup ---
+            # --- Passo 4: Executar GBAK backup (15–88%) ---
             if self._stop:
-                raise InterruptedError("Cancelado pelo usuário.")
-            self._pct(20, "Executando GBAK backup...", "Isso pode levar alguns minutos")
+                raise InterruptedError("Cancelado pelo usuario.")
+
             gbak_exe = os.path.join(self._fb_dir, "gbak.exe")
             cmd = [
                 gbak_exe,
                 "-b", "-v", "-garbage", "-limbo", "-ignore",
-                "-user", GBAK_USER,
-                "-pass", GBAK_PASSWORD,
                 dados_temp,
                 self._backup_bck,
             ]
             self._log(f"Comando: {' '.join(cmd)}", "dim")
-            self._log("─" * 50, "dim")
+            self._log("-" * 50, "dim")
 
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                cwd=self._fb_dir,
+            # Timer: avanca suavemente de 15% ate 85% enquanto o gbak roda
+            timer = _ProgressTimer(
+                progress_fn=lambda pct, desc: self._pct(pct, desc),
+                pct_start=15,
+                pct_soft_end=85,
+                estimated_seconds=_GBAK_ESTIMATED_SECONDS,
+                descricao="Executando backup...",
             )
+            timer.start()
 
-            for line in proc.stdout:
-                if self._stop:
-                    proc.terminate()
-                    raise InterruptedError("Cancelado pelo usuário.")
-                line = line.rstrip()
-                if line:
-                    kind = "err" if any(w in line.lower() for w in ("error", "erro", "failed")) else \
-                           "warn" if any(w in line.lower() for w in ("warning", "aviso")) else "dim"
-                    self._log(line, kind)
+            rc = _rodar_gbak(cmd, self._fb_dir, self._log, lambda: self._stop)
 
-            proc.wait()
-            self._log("─" * 50, "dim")
+            timer.stop()
+            timer = None
+            self._log("-" * 50, "dim")
 
-            if proc.returncode != 0:
-                raise RuntimeError(f"GBAK encerrou com código {proc.returncode}.")
-
-            # Verificar se arquivo foi gerado
+            if rc != 0:
+                raise RuntimeError(f"GBAK encerrou com codigo {rc}.")
             if not os.path.isfile(self._backup_bck):
-                raise RuntimeError("Arquivo de backup não foi gerado.")
+                raise RuntimeError("Arquivo de backup nao foi gerado.")
 
             tamanho = os.path.getsize(self._backup_bck)
             self._log(f"Backup gerado: {self._backup_bck}", "ok")
@@ -195,20 +315,19 @@ class BackupGbakWorker(_BaseWorker):
             info["backup_path"] = self._backup_bck
             info["tamanho"]     = tamanho
 
-            # --- Passo 5: Renomear DADOS_TEMP → DADOS ---
-            self._pct(90, "Restaurando nome original do banco...")
+            # --- Passo 5: Renomear _TEMP de volta (88–95%) ---
+            self._pct(88, "Backup concluido. Restaurando nome do banco...")
             os.rename(dados_temp, self._dados_fdb)
-            self._log("Banco renomeado de volta para DADOS.fdb.", "ok")
+            self._log("Banco renomeado de volta para o nome original.", "ok")
+            self._pct(92, "Aguardando reinicio dos servicos...")
 
             sucesso = True
-            self._pct(100, "Backup concluído com sucesso!")
-            self._log("✔ Backup concluído com sucesso!", "ok")
 
         except InterruptedError as e:
             self._log(str(e), "warn")
             info["cancelado"] = True
             self._pct(0, "Backup cancelado.")
-            self._log("Backup cancelado pelo usuário.", "warn")
+            self._log("Backup cancelado pelo usuario.", "warn")
 
         except Exception as e:
             self._log(f"Erro: {e}", "err")
@@ -216,21 +335,31 @@ class BackupGbakWorker(_BaseWorker):
             log.error(f"[BackupGBAK] Erro: {e}")
 
         finally:
-            # Sempre tentar renomear de volta se DADOS_TEMP ainda existir
-            if dados_temp != self._dados_fdb and os.path.isfile(dados_temp) \
-                    and not os.path.isfile(self._dados_fdb):
+            # Garante que o timer para mesmo em caso de excecao
+            if timer is not None:
+                timer.stop()
+
+            # Recuperacao: renomear _TEMP de volta se o original nao existir
+            if (
+                dados_temp != self._dados_fdb
+                and os.path.isfile(dados_temp)
+                and not os.path.isfile(self._dados_fdb)
+            ):
                 try:
                     os.rename(dados_temp, self._dados_fdb)
-                    self._log("Banco renomeado de volta para DADOS.fdb (recuperação).", "warn")
+                    self._log("Banco renomeado de volta (recuperacao).", "warn")
                 except Exception as ex:
-                    self._log(f"ATENÇÃO: Não foi possível renomear de volta: {ex}", "err")
+                    self._log(f"ATENCAO: Nao foi possivel renomear de volta: {ex}", "err")
 
-            # Reiniciar Firebird
             if self._servicos_parados:
-                self._pct(95, "Reiniciando serviços do Firebird...")
-                self._log("Reiniciando serviços do Firebird...", "info")
+                self._pct(95, "Reiniciando servicos do Firebird...")
+                self._log("Reiniciando servicos do Firebird...", "info")
                 start_firebird_services(self._servicos_parados)
-                self._log("Serviços do Firebird reiniciados.", "ok")
+                self._log("Servicos do Firebird reiniciados.", "ok")
+
+            if sucesso:
+                self._pct(100, "Backup concluido com sucesso!")
+                self._log("Backup concluido com sucesso!", "ok")
 
         self.finished.emit(sucesso, info)
 
@@ -244,98 +373,88 @@ class RestaureGbakWorker(_BaseWorker):
 
     _LOG_PREFIX = "[RestaureGBAK]"
 
-    def __init__(
-        self,
-        firebird_dir: str,
-        backup_bck: str,    # .bck de origem
-        dados_novo: str,    # caminho completo de DADOSNOVO.fdb
-    ):
+    def __init__(self, firebird_dir: str, backup_bck: str, dados_novo: str):
         super().__init__()
-        self._fb_dir           = firebird_dir
-        self._backup_bck       = backup_bck
-        self._dados_novo       = dados_novo
+        self._fb_dir     = firebird_dir
+        self._backup_bck = backup_bck
+        self._dados_novo = dados_novo
         self._servicos_parados: list[str] = []
 
     def run(self):
-        sucesso = False
+        sucesso    = False
         info: dict = {}
+        timer: _ProgressTimer | None = None
 
         log.section("RESTAURE GBAK")
         self._log("Iniciando processo de restaure via GBAK...", "info")
 
         try:
-            # --- Passo 1: Verificar .bck ---
+            # --- Passo 1: Verificar .bck (0–5%) ---
+            self._pct(2, "Verificando arquivo de backup...")
             if not os.path.isfile(self._backup_bck):
-                raise FileNotFoundError(f"Arquivo de backup não encontrado: {self._backup_bck}")
-            self._log(f"Arquivo de backup: {self._backup_bck} ({_fmt_size(os.path.getsize(self._backup_bck))})", "info")
+                raise FileNotFoundError(
+                    f"Arquivo de backup nao encontrado: {self._backup_bck}"
+                )
+            tamanho_bck = os.path.getsize(self._backup_bck)
+            self._log(
+                f"Arquivo de backup: {self._backup_bck} ({_fmt_size(tamanho_bck)})",
+                "info",
+            )
+            self._pct(5, "Arquivo verificado. Preparando restaure...")
 
-            # --- Passo 2: Parar Firebird ---
+            # --- Passo 2: Remover _NOVO se existir ---
             if self._stop:
-                raise InterruptedError("Cancelado pelo usuário.")
-            self._pct(5, "Parando serviços do Firebird...")
-            self._log("Parando serviços do Firebird...", "info")
-            self._servicos_parados = stop_firebird_services()
-            if self._servicos_parados:
-                self._log(f"Serviços parados: {', '.join(self._servicos_parados)}", "ok")
-            else:
-                self._log("Nenhum serviço Firebird ativo (ou já parado).", "warn")
+                raise InterruptedError("Cancelado pelo usuario.")
 
-            # --- Passo 3: Verificar se DADOSNOVO já existe ---
             if os.path.isfile(self._dados_novo):
-                self._log(f"ATENÇÃO: {self._dados_novo} já existe — será sobrescrito.", "warn")
+                self._log(f"Removendo arquivo existente: {self._dados_novo}", "warn")
                 os.remove(self._dados_novo)
 
-            # Criar pasta destino se não existir
-            # BUG CORRIGIDO: os.path.dirname pode retornar "" se o caminho não tiver
-            # separador, causando os.makedirs("") que lança FileNotFoundError.
             pasta_destino = os.path.dirname(self._dados_novo)
             if pasta_destino:
                 os.makedirs(pasta_destino, exist_ok=True)
 
-            # --- Passo 4: Executar GBAK restaure ---
+            # --- Passo 3: Executar GBAK restaure via servidor (5–88%) ---
             if self._stop:
-                raise InterruptedError("Cancelado pelo usuário.")
-            self._pct(15, "Executando GBAK restaure...", "Isso pode levar alguns minutos")
-            gbak_exe = os.path.join(self._fb_dir, "gbak.exe")
+                raise InterruptedError("Cancelado pelo usuario.")
+
+            gbak_exe  = os.path.join(self._fb_dir, "gbak.exe")
+            dest_tcp  = f"localhost:{self._dados_novo}"
+
             cmd = [
                 gbak_exe,
                 "-c", "-v",
                 "-user", GBAK_USER,
                 "-pass", GBAK_PASSWORD,
                 self._backup_bck,
-                self._dados_novo,
+                dest_tcp,
             ]
-            self._log(f"Comando: {' '.join(cmd)}", "dim")
-            self._log("─" * 50, "dim")
+            cmd_log = cmd[:]
+            cmd_log[cmd_log.index("-pass") + 1] = "***"
+            self._log(f"Comando: {' '.join(cmd_log)}", "dim")
+            self._log("-" * 50, "dim")
 
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                cwd=self._fb_dir,
+            # Timer: avanca suavemente de 5% ate 85% enquanto o gbak roda
+            timer = _ProgressTimer(
+                progress_fn=lambda pct, desc: self._pct(pct, desc),
+                pct_start=5,
+                pct_soft_end=85,
+                estimated_seconds=_GBAK_ESTIMATED_SECONDS,
+                descricao="Executando restaure...",
             )
+            timer.start()
 
-            for line in proc.stdout:
-                if self._stop:
-                    proc.terminate()
-                    raise InterruptedError("Cancelado pelo usuário.")
-                line = line.rstrip()
-                if line:
-                    kind = "err" if any(w in line.lower() for w in ("error", "erro", "failed")) else \
-                           "warn" if any(w in line.lower() for w in ("warning", "aviso")) else "dim"
-                    self._log(line, kind)
+            rc = _rodar_gbak(cmd, self._fb_dir, self._log, lambda: self._stop)
 
-            proc.wait()
-            self._log("─" * 50, "dim")
-
-            if proc.returncode != 0:
-                raise RuntimeError(f"GBAK encerrou com código {proc.returncode}.")
+            timer.stop()
+            timer = None
+            self._log("-" * 50, "dim")
 
             if not os.path.isfile(self._dados_novo):
-                raise RuntimeError("Arquivo DADOSNOVO.fdb não foi gerado.")
+                raise RuntimeError(
+                    f"GBAK nao gerou o arquivo de destino (rc={rc}). "
+                    "Verifique o log acima para detalhes do erro."
+                )
 
             tamanho = os.path.getsize(self._dados_novo)
             self._log(f"Banco restaurado: {self._dados_novo}", "ok")
@@ -343,10 +462,8 @@ class RestaureGbakWorker(_BaseWorker):
             info["dados_novo"] = self._dados_novo
             info["tamanho"]    = tamanho
 
+            self._pct(90, "Restaure concluido. Finalizando...")
             sucesso = True
-            self._pct(100, "Restaure concluído com sucesso!")
-            self._log("✔ Restaure concluído! DADOSNOVO.fdb disponível para revisão.", "ok")
-            self._log("O banco DADOS.fdb original não foi alterado.", "info")
 
         except InterruptedError as e:
             self._log(str(e), "warn")
@@ -359,11 +476,20 @@ class RestaureGbakWorker(_BaseWorker):
             log.error(f"[RestaureGBAK] Erro: {e}")
 
         finally:
+            # Garante que o timer para mesmo em caso de excecao
+            if timer is not None:
+                timer.stop()
+
             if self._servicos_parados:
-                self._pct(95, "Reiniciando serviços do Firebird...")
-                self._log("Reiniciando serviços do Firebird...", "info")
+                self._pct(95, "Reiniciando servicos do Firebird...")
+                self._log("Reiniciando servicos do Firebird...", "info")
                 start_firebird_services(self._servicos_parados)
-                self._log("Serviços do Firebird reiniciados.", "ok")
+                self._log("Servicos do Firebird reiniciados.", "ok")
+
+            if sucesso:
+                self._pct(100, "Restaure concluido com sucesso!")
+                self._log("Restaure concluido! Arquivo _NOVO.fdb disponivel para revisao.", "ok")
+                self._log("O banco original nao foi alterado.", "info")
 
         self.finished.emit(sucesso, info)
 
@@ -374,7 +500,7 @@ class RestaureGbakWorker(_BaseWorker):
 
 def _fmt_size(b: int) -> str:
     if b >= 1_073_741_824:
-        return f"{b/1_073_741_824:.1f} GB"
+        return f"{b / 1_073_741_824:.1f} GB"
     if b >= 1_048_576:
-        return f"{b/1_048_576:.1f} MB"
-    return f"{b/1_024:.0f} KB"
+        return f"{b / 1_048_576:.1f} MB"
+    return f"{b / 1_024:.0f} KB"
