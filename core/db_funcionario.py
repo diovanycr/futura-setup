@@ -1,16 +1,13 @@
 """
 core/db_funcionario.py — Acesso ao banco Firebird para edicao de cadastro de funcionarios.
-
 Operacoes disponiveis:
   - buscar_funcionario(conn, fk_cadastro) -> dict | None
   - atualizar_pis(conn, fk_cadastro, novo_pis) -> None
-
 Conexao gerenciada pelo chamador (PageEditarFuncionario) via fdb.connect().
 """
-
 from __future__ import annotations
-
 from typing import Any
+import re
 
 try:
     import fdb
@@ -18,11 +15,9 @@ try:
 except ImportError:
     FDB_DISPONIVEL = False
 
-
 # ---------------------------------------------------------------------------
 # Constantes da tabela
 # ---------------------------------------------------------------------------
-
 TABELA          = "CADASTRO_FUNCIONARIO"
 COL_PK          = "ID"
 COL_FK_CADASTRO = "FK_CADASTRO"
@@ -34,11 +29,9 @@ COLUNAS_EXIBIR = [
     "DATA_DEMISSAO", "FK_FUNCAO", "FK_DEPARTAMENTO", "PIS",
 ]
 
-
 # ---------------------------------------------------------------------------
 # Helpers de conexao
 # ---------------------------------------------------------------------------
-
 def criar_conexao(
     host: str,
     database: str,
@@ -60,11 +53,25 @@ def criar_conexao(
         charset=charset,
     )
 
+# ---------------------------------------------------------------------------
+# Utilitario: normaliza PIS para o formato XXXX.XXXXX.XX/X
+# ---------------------------------------------------------------------------
+def _formatar_pis(pis: str) -> str:
+    """Recebe PIS em qualquer formato e retorna no padrao XXXX.XXXXX.XX/X.
+
+    Formato: 4 digitos . 5 digitos . 2 digitos / 1 digito = 12 digitos no total.
+    Levanta ValueError se o valor nao contiver exatamente 12 digitos.
+    """
+    digits = re.sub(r"\D", "", pis)
+    if len(digits) != 12:
+        raise ValueError(
+            f"PIS inválido: esperado 12 dígitos, encontrado {len(digits)} em '{pis}'."
+        )
+    return f"{digits[:4]}.{digits[4:9]}.{digits[9:11]}/{digits[11]}"
 
 # ---------------------------------------------------------------------------
 # Operacoes
 # ---------------------------------------------------------------------------
-
 def buscar_funcionario(conn, fk_cadastro: int | str) -> dict[str, Any] | None:
     """Busca funcionario por FK_CADASTRO. Retorna dict com colunas ou None se nao encontrado."""
     sql = f"""
@@ -85,19 +92,17 @@ def buscar_funcionario(conn, fk_cadastro: int | str) -> dict[str, Any] | None:
 
 def atualizar_pis(conn, fk_cadastro: int | str, novo_pis: str) -> None:
     """Atualiza o campo PIS do funcionario com FK_CADASTRO informado e faz commit.
-
+    Grava o PIS no formato XXXX.XXXXX.XX/X.
     Verifica a gravacao com SELECT apos o UPDATE para garantir que foi persistido.
-    Grava o PIS sem mascara (apenas digitos) para compatibilidade com o banco.
     """
-    import re
-    pis_digits = re.sub(r"\D", "", novo_pis.strip())
+    pis_formatado = _formatar_pis(novo_pis)
 
     cur = conn.cursor()
     try:
         # 1. Executa o UPDATE
         cur.execute(
             f"UPDATE {TABELA} SET {COL_PIS} = ? WHERE {COL_FK_CADASTRO} = ?",
-            (pis_digits, int(fk_cadastro)),
+            (pis_formatado, int(fk_cadastro)),
         )
         conn.commit()
 
@@ -112,10 +117,10 @@ def atualizar_pis(conn, fk_cadastro: int | str, novo_pis: str) -> None:
                 f"FK_CADASTRO={fk_cadastro} não encontrado em {TABELA} após UPDATE."
             )
         pis_gravado = str(row[0] or "").strip()
-        if pis_gravado != pis_digits:
+        if pis_gravado != pis_formatado:
             raise RuntimeError(
                 f"Falha na gravação: valor no banco '{pis_gravado}' "
-                f"difere do enviado '{pis_digits}'."
+                f"difere do enviado '{pis_formatado}'."
             )
     except Exception:
         try:

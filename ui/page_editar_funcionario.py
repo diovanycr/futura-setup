@@ -55,9 +55,9 @@ _DEFAULT_PASSWORD = "sbofutura"
 def _make_primary_btn(text: str, min_width: int = 160) -> QPushButton:
     btn = QPushButton(text)
     btn.setMinimumWidth(min_width)
-    btn.setMinimumHeight(36)
+    btn.setMinimumHeight(28)
     btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    btn.setFont(QFont(FONT_SANS, 13, QFont.Weight.Bold))
+    btn.setFont(QFont(FONT_SANS, 11, QFont.Weight.Bold))
     _apply_primary(btn)
     theme_manager.theme_changed.connect(lambda _: _apply_primary(btn))
     return btn
@@ -66,9 +66,9 @@ def _make_primary_btn(text: str, min_width: int = 160) -> QPushButton:
 def _make_secondary_btn(text: str, min_width: int = 120) -> QPushButton:
     btn = QPushButton(text)
     btn.setMinimumWidth(min_width)
-    btn.setMinimumHeight(36)
+    btn.setMinimumHeight(28)
     btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    btn.setFont(QFont(FONT_SANS, 12))
+    btn.setFont(QFont(FONT_SANS, 10))
     _apply_secondary(btn)
     theme_manager.theme_changed.connect(lambda _: _apply_secondary(btn))
     return btn
@@ -81,10 +81,10 @@ def _apply_primary(btn: QPushButton):
             background-color: {COLORS['accent']};
             color: {text_color};
             border: none;
-            border-radius: 6px;
-            padding: 8px 20px;
+            border-radius: 5px;
+            padding: 5px 14px;
             font-weight: 700;
-            font-size: 13px;
+            font-size: 10px;
         }}
         QPushButton:hover   {{ background-color: {COLORS['accent_hover']}; }}
         QPushButton:pressed {{ background-color: {COLORS['accent_press']}; }}
@@ -101,9 +101,9 @@ def _apply_secondary(btn: QPushButton):
             background-color: transparent;
             color: {COLORS['text']};
             border: 1.5px solid {COLORS['btn_border']};
-            border-radius: 6px;
-            padding: 8px 16px;
-            font-size: 12px;
+            border-radius: 5px;
+            padding: 5px 12px;
+            font-size: 10px;
         }}
         QPushButton:hover {{
             background-color: {COLORS['panel_hover']};
@@ -136,13 +136,13 @@ class _FormField(QWidget):
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(4)
+        lay.setSpacing(3)
 
         self._lbl  = QLabel(label_text)
         self._edit = QLineEdit()
         self._edit.setPlaceholderText(placeholder)
-        self._edit.setMinimumHeight(34)
-        self._edit.setFont(QFont(FONT_MONO, 12))
+        self._edit.setMinimumHeight(28)
+        self._edit.setFont(QFont(FONT_MONO, 10))
 
         if input_type == "number":
             # Aceita apenas digitos
@@ -152,8 +152,8 @@ class _FormField(QWidget):
             self._edit.setValidator(val)
 
         elif input_type == "pis":
-            # PIS: 11 digitos, aceita com ou sem mascara (###.#####.##-#)
-            self._edit.setMaxLength(14)
+            # PIS: 11 digitos, mascara XXXX.XXXXX.XX/X
+            self._edit.setMaxLength(15)  # 12 digitos + 3 separadores (2 pontos + 1 barra)
             self._edit.textChanged.connect(self._mascara_pis)
 
         lay.addWidget(self._lbl)
@@ -164,7 +164,7 @@ class _FormField(QWidget):
 
     def _upd(self, _mode: str = ""):
         self._lbl.setStyleSheet(
-            f"color: {COLORS['text']}; font-size: 12px; font-weight: 600;"
+            f"color: {COLORS['text']}; font-size: 10px; font-weight: 600;"
             f" font-family: {FONT_SANS};"
         )
         self._edit.setStyleSheet(f"""
@@ -172,9 +172,9 @@ class _FormField(QWidget):
                 background: {COLORS['surface']};
                 color: {COLORS['text']};
                 border: 1.5px solid {COLORS['border']};
-                border-radius: 6px;
-                padding: 4px 10px;
-                font-size: 13px;
+                border-radius: 5px;
+                padding: 3px 8px;
+                font-size: 10px;
             }}
             QLineEdit:focus {{
                 border-color: {COLORS['accent']};
@@ -186,15 +186,22 @@ class _FormField(QWidget):
         """)
 
     def _mascara_pis(self, text: str):
-        """Aplica mascara ###.#####.##-# conforme digita."""
-        digits = re.sub(r"\D", "", text)[:11]
-        masked = digits
-        if len(digits) > 3:
-            masked = digits[:3] + "." + digits[3:]
-        if len(digits) > 8:
-            masked = masked[:9] + "." + masked[9:]
-        if len(digits) > 10:
-            masked = masked[:12] + "-" + masked[12:]
+        """Aplica mascara XXXX.XXXXX.XX/X conforme digita.
+
+        Formato com 12 digitos: XXXX.XXXXX.XX/X
+          4 digitos . 5 digitos . 2 digitos / 1 digito
+        """
+        digits = re.sub(r"\D", "", text)[:12]
+        n = len(digits)
+
+        if n <= 4:
+            masked = digits
+        elif n <= 9:
+            masked = digits[:4] + "." + digits[4:]
+        elif n <= 11:
+            masked = digits[:4] + "." + digits[4:9] + "." + digits[9:]
+        else:  # n == 12
+            masked = digits[:4] + "." + digits[4:9] + "." + digits[9:11] + "/" + digits[11]
 
         self._edit.blockSignals(True)
         self._edit.setText(masked)
@@ -218,7 +225,7 @@ class _FormField(QWidget):
         self._edit.setFocus()
 
     def pis_digits(self) -> str:
-        """Retorna apenas os digitos do PIS (sem mascara)."""
+        """Retorna apenas os digitos do PIS (sem mascara). Esperado: 12 digitos."""
         return re.sub(r"\D", "", self.value)
 
 
@@ -402,8 +409,8 @@ class _PainelFuncionario(QWidget):
         self._frame = QFrame()
         self._frame.setObjectName("FuncFrame")
         frame_lay = QVBoxLayout(self._frame)
-        frame_lay.setContentsMargins(16, 12, 16, 12)
-        frame_lay.setSpacing(6)
+        frame_lay.setContentsMargins(8, 6, 8, 6)
+        frame_lay.setSpacing(3)
 
         for col in COLUNAS_EXIBIR:
             if col not in self._LABELS:
@@ -412,14 +419,14 @@ class _PainelFuncionario(QWidget):
             row_w.setStyleSheet("background: transparent;")
             row_lay = QHBoxLayout(row_w)
             row_lay.setContentsMargins(0, 0, 0, 0)
-            row_lay.setSpacing(8)
+            row_lay.setSpacing(3)
 
             lbl_key = QLabel(self._LABELS[col] + ":")
-            lbl_key.setFixedWidth(150)
-            lbl_key.setFont(QFont(FONT_SANS, 11))
+            lbl_key.setFixedWidth(120)
+            lbl_key.setFont(QFont(FONT_SANS, 9))
 
             lbl_val = QLabel("—")
-            lbl_val.setFont(QFont(FONT_MONO, 11))
+            lbl_val.setFont(QFont(FONT_MONO, 9))
             lbl_val.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
 
             row_lay.addWidget(lbl_key)
@@ -437,7 +444,7 @@ class _PainelFuncionario(QWidget):
             QFrame#FuncFrame {{
                 background: {COLORS['surface']};
                 border: 1px solid {COLORS['border']};
-                border-radius: 8px;
+                border-radius: 5px;
             }}
         """)
         for col, lbl_val in self._rows.items():
@@ -456,12 +463,27 @@ class _PainelFuncionario(QWidget):
             texto = str(val) if val not in (None, "") else "—"
             lbl.setText(texto)
 
-        # Destaca o novo PIS em verde
+        # Destaca o novo PIS em verde, exibindo no formato XXXX.XXXXX.XX/X
         if "PIS" in self._rows and novo_pis:
-            self._rows["PIS"].setText(f"{dados.get('PIS') or '—'}  →  {novo_pis}")
+            pis_atual = dados.get('PIS') or '—'
+            novo_pis_fmt = _formatar_pis(novo_pis)
+            self._rows["PIS"].setText(f"{pis_atual}  →  {novo_pis_fmt}")
             self._rows["PIS"].setStyleSheet(
                 f"color: {COLORS['accent2']}; background: transparent; font-weight: 700;"
             )
+
+
+# ---------------------------------------------------------------------------
+# Utilitario: formata PIS no padrao XXXX.XXXXX.XX/X a partir de digitos ou
+# string ja mascarada
+# ---------------------------------------------------------------------------
+
+def _formatar_pis(pis: str) -> str:
+    """Recebe PIS em qualquer formato e retorna no padrao XXXX.XXXXX.XX/X."""
+    digits = re.sub(r"\D", "", pis)[:12]
+    if len(digits) < 12:
+        return pis  # devolve como esta se incompleto
+    return f"{digits[:4]}.{digits[4:9]}.{digits[9:11]}/{digits[11]}"
 
 
 # ---------------------------------------------------------------------------
@@ -476,13 +498,13 @@ class _PathFieldDB(QWidget):
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(4)
+        lay.setSpacing(3)
 
         self._lbl  = QLabel("Caminho do banco de dados (.fdb)")
         self._edit = QLineEdit()
         self._edit.setPlaceholderText(r"Ex: C:\Futura\Dados\DADOS.fdb")
-        self._edit.setMinimumHeight(34)
-        self._edit.setFont(QFont(FONT_MONO, 12))
+        self._edit.setMinimumHeight(28)
+        self._edit.setFont(QFont(FONT_MONO, 10))
 
         self._btn = QPushButton()
         self._btn.setIcon(
@@ -490,13 +512,13 @@ class _PathFieldDB(QWidget):
                 QApplication.style().StandardPixmap.SP_DirOpenIcon
             )
         )
-        self._btn.setFixedSize(34, 34)
+        self._btn.setFixedSize(28, 28)
         self._btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._btn.setToolTip("Selecionar arquivo .fdb")
         self._btn.clicked.connect(self._browse)
 
         row = QHBoxLayout()
-        row.setSpacing(5)
+        row.setSpacing(3)
         row.addWidget(self._edit, 1)
         row.addWidget(self._btn)
 
@@ -508,7 +530,7 @@ class _PathFieldDB(QWidget):
 
     def _upd(self, _mode: str = ""):
         self._lbl.setStyleSheet(
-            f"color: {COLORS['text']}; font-size: 12px; font-weight: 600;"
+            f"color: {COLORS['text']}; font-size: 10px; font-weight: 600;"
             f" font-family: {FONT_SANS};"
         )
         self._edit.setStyleSheet(f"""
@@ -516,9 +538,9 @@ class _PathFieldDB(QWidget):
                 background: {COLORS['surface']};
                 color: {COLORS['text']};
                 border: 1.5px solid {COLORS['border']};
-                border-radius: 6px;
-                padding: 4px 10px;
-                font-size: 13px;
+                border-radius: 5px;
+                padding: 3px 8px;
+                font-size: 10px;
             }}
             QLineEdit:focus {{ border-color: {COLORS['accent']}; }}
         """)
@@ -526,19 +548,17 @@ class _PathFieldDB(QWidget):
             QPushButton {{
                 background: {COLORS['surface']};
                 border: 1.5px solid {COLORS['border']};
-                border-radius: 6px;
+                border-radius: 5px;
             }}
             QPushButton:hover {{ background: {COLORS['panel_hover']}; }}
             QPushButton:pressed {{ background: {COLORS['panel_press']}; }}
         """)
 
     def _browse(self):
-        current = self._edit.text().strip()
-        inicio  = os.path.dirname(current) if current and os.path.exists(os.path.dirname(current)) else "C:\\"
         path, _ = QFileDialog.getOpenFileName(
             self,
             "Selecionar banco de dados Firebird",
-            inicio,
+            "C:\\",
             "Banco Firebird (*.fdb);;Todos os arquivos (*.*)",
         )
         if path:
@@ -606,8 +626,8 @@ class _StepFormulario(QWidget):
 
         inner = QWidget()
         lay   = QVBoxLayout(inner)
-        lay.setContentsMargins(0, 0, 16, 0)
-        lay.setSpacing(10)
+        lay.setContentsMargins(0, 0, 10, 0)
+        lay.setSpacing(7)
 
         # Aviso se fdb nao instalado
         if not FDB_DISPONIVEL:
@@ -624,23 +644,19 @@ class _StepFormulario(QWidget):
         # --- Conexao ---
         lay.addWidget(SectionHeader("Conexão com o Banco"))
 
-        self._fld_host = _FormField(
-            "Host / IP do servidor",
-            "Ex: localhost  ou  192.168.1.10",
-        )
-        self._fld_host.value = _DEFAULT_HOST
-        lay.addWidget(self._fld_host)
-
         # Campo .fdb com explorer
         self._fld_db = _PathFieldDB()
         self._fld_db.value = _DEFAULT_DATABASE
         lay.addWidget(self._fld_db)
 
         # Botao testar conexao (logo abaixo dos campos de conexao)
-        self._btn_testar = _make_secondary_btn("Testar Conexão", 160)
+        self._btn_testar = _make_primary_btn("Testar Conexão", 144)
         self._btn_testar.clicked.connect(self._on_testar)
         self._btn_testar.setEnabled(FDB_DISPONIVEL)
-        lay.addWidget(self._btn_testar)
+        _testar_row = QHBoxLayout()
+        _testar_row.addWidget(self._btn_testar)
+        _testar_row.addStretch()
+        lay.addLayout(_testar_row)
 
         # --- Dados ---
         lay.addWidget(SectionHeader("Dados do Funcionário"))
@@ -656,7 +672,7 @@ class _StepFormulario(QWidget):
         btn_busca_wrap.setStyleSheet("background: transparent;")
         btn_busca_wrap_lay = QVBoxLayout(btn_busca_wrap)
         btn_busca_wrap_lay.setContentsMargins(0, 0, 0, 0)
-        btn_busca_wrap_lay.setSpacing(4)
+        btn_busca_wrap_lay.setSpacing(3)
         btn_busca_wrap_lay.addWidget(QLabel(""))
         self._btn_buscar_nome = _make_secondary_btn("Buscar", 90)
         self._btn_buscar_nome.clicked.connect(self._on_buscar_nome)
@@ -664,7 +680,7 @@ class _StepFormulario(QWidget):
         btn_busca_wrap_lay.addWidget(self._btn_buscar_nome)
 
         nome_busca_row = QHBoxLayout()
-        nome_busca_row.setSpacing(8)
+        nome_busca_row.setSpacing(3)
         nome_busca_row.addWidget(self._fld_busca_nome, 1)
         nome_busca_row.addWidget(btn_busca_wrap)
         lay.addLayout(nome_busca_row)
@@ -674,10 +690,10 @@ class _StepFormulario(QWidget):
         self._lista_frame.setObjectName("ListaFrame")
         self._lista_frame.setVisible(False)
         lista_lay = QVBoxLayout(self._lista_frame)
-        lista_lay.setContentsMargins(6, 6, 6, 6)
+        lista_lay.setContentsMargins(4, 4, 4, 4)
         lista_lay.setSpacing(2)
         self._lista_header = QLabel("Selecione o funcionário:")
-        self._lista_header.setFont(QFont(FONT_SANS, 11))
+        self._lista_header.setFont(QFont(FONT_SANS, 9))
         lista_lay.addWidget(self._lista_header)
         self._lista_itens_lay = QVBoxLayout()
         self._lista_itens_lay.setSpacing(2)
@@ -688,7 +704,7 @@ class _StepFormulario(QWidget):
 
         # FK_CADASTRO + botao pesquisar lado a lado
         id_row = QHBoxLayout()
-        id_row.setSpacing(8)
+        id_row.setSpacing(3)
         self._fld_id = _FormField(
             "FK_CADASTRO  (ID do funcionário)",
             "Ex: 42",
@@ -702,7 +718,7 @@ class _StepFormulario(QWidget):
         btn_id_wrap.setStyleSheet("background: transparent;")
         btn_id_wrap_lay = QVBoxLayout(btn_id_wrap)
         btn_id_wrap_lay.setContentsMargins(0, 0, 0, 0)
-        btn_id_wrap_lay.setSpacing(4)
+        btn_id_wrap_lay.setSpacing(3)
         btn_id_wrap_lay.addWidget(QLabel(""))   # espaco do label do campo
         btn_id_wrap_lay.addWidget(self._btn_pesquisar_id)
 
@@ -715,12 +731,12 @@ class _StepFormulario(QWidget):
         self._nome_frame.setObjectName("NomeFrame")
         self._nome_frame.setVisible(False)
         nome_lay = QHBoxLayout(self._nome_frame)
-        nome_lay.setContentsMargins(12, 8, 12, 8)
-        nome_lay.setSpacing(8)
+        nome_lay.setContentsMargins(8, 6, 8, 6)
+        nome_lay.setSpacing(3)
         self._nome_icone = QLabel("👤")
-        self._nome_icone.setFont(QFont(FONT_SANS, 13))
+        self._nome_icone.setFont(QFont(FONT_SANS, 10))
         self._nome_label = QLabel("")
-        self._nome_label.setFont(QFont(FONT_SANS, 12, QFont.Weight.Bold))
+        self._nome_label.setFont(QFont(FONT_SANS, 10, QFont.Weight.Bold))
         self._nome_label.setWordWrap(True)
         nome_lay.addWidget(self._nome_icone)
         nome_lay.addWidget(self._nome_label, 1)
@@ -730,7 +746,7 @@ class _StepFormulario(QWidget):
 
         self._fld_pis = _FormField(
             "Novo PIS",
-            "Ex: 123.45678.90-1",
+            "Ex: 1234.56789.01/2",
             input_type="pis",
         )
         lay.addWidget(self._fld_pis)
@@ -742,15 +758,15 @@ class _StepFormulario(QWidget):
         # --- Footer ---
         footer   = QWidget()
         foot_lay = QVBoxLayout(footer)
-        foot_lay.setContentsMargins(0, 8, 0, 0)
-        foot_lay.setSpacing(6)
+        foot_lay.setContentsMargins(0, 5, 0, 0)
+        foot_lay.setSpacing(3)
 
         self._btn_alterar = _make_primary_btn("Alterar PIS", 180)
         self._btn_alterar.clicked.connect(self._on_buscar)
         self._btn_alterar.setEnabled(FDB_DISPONIVEL)
 
         btn_row = QHBoxLayout()
-        btn_row.setSpacing(10)
+        btn_row.setSpacing(7)
         btn_row.addWidget(self._btn_alterar)
         btn_row.addStretch()
 
@@ -763,7 +779,7 @@ class _StepFormulario(QWidget):
             QFrame#ListaFrame {{
                 background: {COLORS['surface']};
                 border: 1px solid {COLORS['border']};
-                border-radius: 6px;
+                border-radius: 5px;
             }}
         """)
         self._lista_header.setStyleSheet(
@@ -775,7 +791,7 @@ class _StepFormulario(QWidget):
             QFrame#NomeFrame {{
                 background: {COLORS['surface']};
                 border: 1.5px solid {COLORS['accent']};
-                border-radius: 6px;
+                border-radius: 5px;
             }}
         """)
         self._nome_label.setStyleSheet(f"color: {COLORS['accent']}; background: transparent;")
@@ -799,7 +815,7 @@ class _StepFormulario(QWidget):
         self._lista_frame.setVisible(False)
 
         self._worker_busca_nome = _BuscarPorNomeWorker(
-            self._fld_host.value,
+            _DEFAULT_HOST,
             self._fld_db.value,
             _DEFAULT_USER,
             _DEFAULT_PASSWORD,
@@ -836,9 +852,9 @@ class _StepFormulario(QWidget):
 
         for cid, nome in resultados:
             btn = QPushButton(f"  {cid}  —  {nome}")
-            btn.setMinimumHeight(32)
+            btn.setMinimumHeight(26)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setFont(QFont(FONT_MONO, 11))
+            btn.setFont(QFont(FONT_MONO, 9))
             btn.setStyleSheet(f"""
                 QPushButton {{
                     background: transparent;
@@ -846,7 +862,7 @@ class _StepFormulario(QWidget):
                     border: none;
                     border-radius: 4px;
                     text-align: left;
-                    padding: 2px 8px;
+                    padding: 1px 6px;
                 }}
                 QPushButton:hover {{
                     background: {COLORS['accent_dim']};
@@ -899,7 +915,7 @@ class _StepFormulario(QWidget):
         self._nome_frame.setVisible(False)
 
         self._worker_nome = _PesquisarNomeWorker(
-            self._fld_host.value,
+            _DEFAULT_HOST,
             self._fld_db.value,
             _DEFAULT_USER,
             _DEFAULT_PASSWORD,
@@ -940,7 +956,7 @@ class _StepFormulario(QWidget):
         self._alert.set_kind("info")
 
         self._worker_teste = _TestarConexaoWorker(
-            self._fld_host.value,
+            _DEFAULT_HOST,
             self._fld_db.value,
             _DEFAULT_USER,
             _DEFAULT_PASSWORD,
@@ -976,8 +992,8 @@ class _StepFormulario(QWidget):
             self._alert.set_text("Informe o FK_CADASTRO do funcionário.")
             self._alert.set_kind("danger")
             return
-        if len(pis_digits) != 11:
-            self._alert.set_text("PIS inválido — informe 11 dígitos.")
+        if len(pis_digits) != 12:
+            self._alert.set_text("PIS inválido — informe 12 dígitos.")
             self._alert.set_kind("danger")
             return
 
@@ -1003,7 +1019,7 @@ class _StepFormulario(QWidget):
 
     @property
     def host(self) -> str:
-        return self._fld_host.value
+        return _DEFAULT_HOST
 
     @property
     def database(self) -> str:
@@ -1035,7 +1051,7 @@ class _StepConfirmacao(QWidget):
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(12)
+        lay.setSpacing(3)
 
         self._alert = AlertBox("Confirme os dados antes de salvar.", "warn")
         lay.addWidget(self._alert)
@@ -1054,7 +1070,7 @@ class _StepConfirmacao(QWidget):
         self._btn_voltar.clicked.connect(self.voltar.emit)
 
         btn_row = QHBoxLayout()
-        btn_row.setSpacing(10)
+        btn_row.setSpacing(7)
         btn_row.addWidget(self._btn_voltar)
         btn_row.addWidget(self._btn_confirmar)
         btn_row.addStretch()
@@ -1093,7 +1109,7 @@ class _StepResultado(QWidget):
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(12)
+        lay.setSpacing(3)
 
         self._alert      = AlertBox("", "success")
         self._result_box = ResultBox("Resultado", [], "success")
@@ -1109,7 +1125,7 @@ class _StepResultado(QWidget):
         self._btn_menu.clicked.connect(self.go_menu.emit)
 
         btn_row = QHBoxLayout()
-        btn_row.setSpacing(10)
+        btn_row.setSpacing(7)
         btn_row.addWidget(self._btn_nova)
         btn_row.addWidget(self._btn_menu)
         btn_row.addStretch()
@@ -1127,7 +1143,8 @@ class _StepResultado(QWidget):
                 "Alteração realizada",
                 [
                     ("FK_CADASTRO", fk_cadastro),
-                    ("Novo PIS",    novo_pis),
+                    # Exibe o PIS gravado ja formatado no padrao XXXX.XXXXX.XX/X
+                    ("Novo PIS",    _formatar_pis(novo_pis)),
                 ],
                 "success",
             )
@@ -1171,8 +1188,8 @@ class PageEditarFuncionario(QWidget):
         self._database: str            = _DEFAULT_DATABASE
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(40, 36, 40, 20)
-        root.setSpacing(8)
+        root.setContentsMargins(28, 24, 28, 14)
+        root.setSpacing(3)
 
         root.addWidget(PageTitle("", "Editar Cadastro de Funcionário"))
 
@@ -1202,6 +1219,7 @@ class PageEditarFuncionario(QWidget):
 
     def _go_form(self):
         self._form.reabilitar()
+        self._confirm.reabilitar()
         self._stack.setCurrentIndex(self._IDX_FORM)
 
     def keyPressEvent(self, event):
