@@ -32,6 +32,7 @@ from ui.page_port_opener        import PagePortOpener
 from ui.page_diagnostico        import PageDiagnostico
 from ui.page_editar_funcionario import PageEditarFuncionario
 from ui.page_implantar_mobile   import PageImplantarMobile
+from ui.page_shutdown_online    import PageShutdownOnline
 from core.logger                import log
 from config                     import APP_VERSION
 
@@ -496,13 +497,15 @@ class Sidebar(QWidget):
         self.nav_port_opener     = NavItem("Firewall — Portas",   "🔓")
         self.nav_diagnostico     = NavItem("Diagnóstico",         "🔍")
         self.nav_editar_func     = NavItem("Editar Funcionário",  "✏️")
-        self.nav_implantar_mobile = NavItem("Implantar Mobile",   "📱")
+        self.nav_implantar_mobile  = NavItem("Implantar Mobile",   "📱")
+        self.nav_shutdown_online   = NavItem("Shutdown / Online",  "⏻")
         inner_lay.addWidget(self.nav_log)
         inner_lay.addWidget(self.nav_backup_gbak)
         inner_lay.addWidget(self.nav_port_opener)
         inner_lay.addWidget(self.nav_diagnostico)
         inner_lay.addWidget(self.nav_editar_func)
         inner_lay.addWidget(self.nav_implantar_mobile)
+        inner_lay.addWidget(self.nav_shutdown_online)
 
         self.nav_atalhos.set_enabled(False)
         self.nav_terminal.set_enabled(False)
@@ -527,6 +530,7 @@ class Sidebar(QWidget):
             self.nav_atualizacao, self.nav_log,
             self.nav_backup_gbak, self.nav_port_opener, self.nav_diagnostico,
             self.nav_editar_func, self.nav_implantar_mobile,
+            self.nav_shutdown_online,
         ]
 
         self._upd()
@@ -570,7 +574,8 @@ _IDX_BACKUP_GBAK      = 7
 _IDX_PORT_OPENER      = 8
 _IDX_DIAGNOSTICO      = 9
 _IDX_EDITAR_FUNC      = 10
-_IDX_IMPLANTAR_MOBILE = 11
+_IDX_IMPLANTAR_MOBILE  = 11
+_IDX_SHUTDOWN_ONLINE   = 12
 
 
 class MainWindow(QMainWindow):
@@ -604,7 +609,8 @@ class MainWindow(QMainWindow):
         self._page_port_opener      = PagePortOpener()
         self._page_diagnostico      = PageDiagnostico()
         self._page_editar_func      = PageEditarFuncionario()
-        self._page_implantar_mobile = PageImplantarMobile()
+        self._page_implantar_mobile  = PageImplantarMobile()
+        self._page_shutdown_online   = PageShutdownOnline()
 
         for p in [
             self._page_menu,             # 0
@@ -618,7 +624,8 @@ class MainWindow(QMainWindow):
             self._page_port_opener,      # 8
             self._page_diagnostico,      # 9
             self._page_editar_func,      # 10
-            self._page_implantar_mobile, # 11
+            self._page_implantar_mobile,  # 11
+            self._page_shutdown_online,   # 12
         ]:
             self._stack.addWidget(p)
 
@@ -645,6 +652,7 @@ class MainWindow(QMainWindow):
         self._page_diagnostico.go_menu.connect(self._go_menu)
         self._page_editar_func.go_menu.connect(self._go_menu)
         self._page_implantar_mobile.go_menu.connect(self._go_menu)
+        self._page_shutdown_online.go_menu.connect(self._go_menu)
 
         # ── Sidebar clicks ──
         self._sidebar.nav_menu.on_click(lambda: self._navigate(self._go_menu))
@@ -656,6 +664,9 @@ class MainWindow(QMainWindow):
         self._sidebar.nav_editar_func.on_click(lambda: self._navigate(self._go_editar_func))
         self._sidebar.nav_implantar_mobile.on_click(
             lambda: self._navigate(self._go_implantar_mobile)
+        )
+        self._sidebar.nav_shutdown_online.on_click(
+            lambda: self._navigate(self._go_shutdown_online)
         )
         self._sidebar.nav_atalhos.on_click(
             lambda: self._navigate(
@@ -720,6 +731,7 @@ class MainWindow(QMainWindow):
             self._page_port_opener,
             self._page_editar_func,
             self._page_implantar_mobile,
+            self._page_shutdown_online,
         ]
 
     def _get_active_workers(self) -> list:
@@ -751,6 +763,7 @@ class MainWindow(QMainWindow):
                 self._page_port_opener:      self._sidebar.nav_port_opener,
                 self._page_editar_func:      self._sidebar.nav_editar_func,
                 self._page_implantar_mobile: self._sidebar.nav_implantar_mobile,
+                self._page_shutdown_online:  self._sidebar.nav_shutdown_online,
             }
         return self._page_nav_map
 
@@ -817,6 +830,10 @@ class MainWindow(QMainWindow):
     def _go_implantar_mobile(self):
         self._page_implantar_mobile.reset()
         self._show(_IDX_IMPLANTAR_MOBILE, self._sidebar.nav_implantar_mobile)
+
+    def _go_shutdown_online(self):
+        self._page_shutdown_online.reset()
+        self._show(_IDX_SHUTDOWN_ONLINE, self._sidebar.nav_shutdown_online)
 
     def _start_atalhos(self):
         self._flow_mode = "atalhos"
