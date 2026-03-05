@@ -1,14 +1,9 @@
 # =============================================================================
-# FUTURA SETUP — Página: Ver Log v3
-# Melhorias v3:
-#   - Debounce 200ms no campo de busca (evita rebuild do console a cada tecla)
-#   - _open_external: verifica se o arquivo existe antes de abrir o Notepad
-#   - Usa log.read_log_tail() (limita memória a ~5000 linhas)
-#   - subprocess importado no topo
-# Melhorias v4:
-#   - Botão Atualizar no padrão azul (_make_primary_btn)
-#   - Botões de filtro (tipo/data) menores (height 26, font 10)
-#   - Console de log maior (minHeight aumentado)
+# FUTURA SETUP — Página: Ver Log v5
+# Melhorias v5:
+#   - LogConsole ocupa todo o espaço restante da página (sem altura fixa)
+#   - Layout corrigido: content com stretch=1, footer fixo na base
+#   - Removido setMinimumHeight manual (agora controlado por SizePolicy)
 # =============================================================================
 
 import subprocess
@@ -16,7 +11,7 @@ from datetime import datetime, timedelta
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLineEdit,
-    QPushButton, QFileDialog
+    QPushButton, QFileDialog, QSizePolicy
 )
 from PyQt6.QtCore import pyqtSignal, Qt, QTimer
 from PyQt6.QtGui import QFont
@@ -27,7 +22,7 @@ from ui.theme_manager import theme_manager
 from core.logger import log
 
 
-# ── HELPERS DE BOTÃO ─────────────────────────────────────────────────────────
+# -- HELPERS DE BOTÃO ---------------------------------------------------------
 
 def _make_primary_btn(text: str, min_width: int = 140) -> QPushButton:
     btn = QPushButton(text)
@@ -96,15 +91,17 @@ class PageLog(QWidget):
         self._active_filter_date = "Tudo"
         self._active_search      = ""
 
+        # Layout raiz: conteúdo expansível + rodapé fixo
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # ── Área de conteúdo ──────────────────────────────────────────────────
+        # ── Área de conteúdo (expande) ────────────────────────────────────────
         content = QWidget()
         content.setStyleSheet("background: transparent;")
+        content.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         lay = QVBoxLayout(content)
-        lay.setContentsMargins(40, 36, 40, 12)
+        lay.setContentsMargins(40, 36, 40, 0)
         lay.setSpacing(0)
 
         lay.addWidget(PageTitle("HISTÓRICO", "Log de Execuções"))
@@ -113,7 +110,7 @@ class PageLog(QWidget):
         lay.addWidget(self._alert)
         lay.addWidget(spacer(h=12))
 
-        # ── Busca ─────────────────────────────────────────────────────────────
+        # -- Busca -------------------------------------------------------------
         self._search_input = QLineEdit()
         self._search_input.setPlaceholderText("🔍  Buscar no log...")
         self._search_input.setFont(QFont(FONT_SANS, 12))
@@ -125,14 +122,14 @@ class PageLog(QWidget):
         lay.addWidget(self._search_input)
         lay.addWidget(spacer(h=8))
 
-        # ── Filtros por tipo ──────────────────────────────────────────────────
+        # -- Filtros por tipo --------------------------------------------------
         kind_row = QHBoxLayout()
         kind_row.setSpacing(5)
         self._kind_btns: list[QPushButton] = []
         for kind in self._FILTER_KINDS:
             btn = QPushButton(kind)
-            btn.setFont(QFont(FONT_SANS, 10))   # ← menor
-            btn.setFixedHeight(26)               # ← menor
+            btn.setFont(QFont(FONT_SANS, 10))
+            btn.setFixedHeight(26)
             btn.setMinimumWidth(52)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setCheckable(True)
@@ -147,14 +144,14 @@ class PageLog(QWidget):
         lay.addWidget(kind_w)
         lay.addWidget(spacer(h=4))
 
-        # ── Filtros por data ──────────────────────────────────────────────────
+        # -- Filtros por data --------------------------------------------------
         date_row = QHBoxLayout()
         date_row.setSpacing(5)
         self._date_btns: list[QPushButton] = []
         for d in self._FILTER_DATES:
             btn = QPushButton(d)
-            btn.setFont(QFont(FONT_SANS, 10))   # ← menor
-            btn.setFixedHeight(26)               # ← menor
+            btn.setFont(QFont(FONT_SANS, 10))
+            btn.setFixedHeight(26)
             btn.setMinimumWidth(52)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setCheckable(True)
@@ -171,27 +168,27 @@ class PageLog(QWidget):
 
         lay.addWidget(SectionHeader("Conteúdo do Log"))
 
-        # Console maior — ocupa todo o espaço restante
+        # Console expande para preencher tudo que restar
         self._console = LogConsole(max_height=0)
-        self._console.setMinimumHeight(260)     # ← aumentado
-        lay.addWidget(self._console, 1)
+        lay.addWidget(self._console, 1)   # stretch=1 → ocupa todo o espaço livre
 
-        root.addWidget(content, 1)
+        root.addWidget(content, 1)        # content também expande
 
         # ── Rodapé fixo ───────────────────────────────────────────────────────
         footer = QWidget()
         footer.setStyleSheet("background: transparent;")
+        footer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         footer_lay = QVBoxLayout(footer)
-        footer_lay.setContentsMargins(40, 8, 40, 20)
+        footer_lay.setContentsMargins(40, 10, 40, 20)
         footer_lay.setSpacing(0)
 
         btns = QHBoxLayout()
         btns.setSpacing(8)
 
-        btn_refresh = _make_primary_btn("↺  ATUALIZAR", 140)   # ← azul
+        btn_refresh = _make_primary_btn("↺  ATUALIZAR", 140)
         btn_refresh.clicked.connect(self.load_log)
 
-        btn_export = _make_secondary_btn("⬇  EXPORTAR", 130)
+        btn_export = _make_secondary_btn("↓  EXPORTAR", 130)
         btn_export.clicked.connect(self._export_log)
 
         btn_open = _make_secondary_btn("ABRIR EXTERNAMENTE", 190)
@@ -211,7 +208,7 @@ class PageLog(QWidget):
         btn_w.setStyleSheet("background: transparent;")
         footer_lay.addWidget(btn_w)
 
-        root.addWidget(footer, 0)
+        root.addWidget(footer, 0)         # footer fixo, não expande
 
         self._upd_filter_btns()
         theme_manager.theme_changed.connect(self._upd_filter_btns)
@@ -219,7 +216,7 @@ class PageLog(QWidget):
             lambda _: footer.setStyleSheet("background: transparent;")
         )
 
-    # ── ESTILO DOS BOTÕES DE FILTRO ───────────────────────────────────────────
+    # -- ESTILO DOS BOTÕES DE FILTRO -------------------------------------------
 
     def _upd_filter_btns(self, _mode: str = ""):
         for btn in self._kind_btns + self._date_btns:
@@ -236,7 +233,7 @@ class PageLog(QWidget):
                     f"padding: 0 10px;"
                 )
 
-    # ── FILTROS ───────────────────────────────────────────────────────────────
+    # -- FILTROS ---------------------------------------------------------------
 
     def _set_kind_filter(self, kind: str):
         self._active_filter_kind = kind
@@ -283,7 +280,7 @@ class PageLog(QWidget):
                         pass
             self._console.append_line(text, kind)
 
-    # ── CARREGAR LOG ──────────────────────────────────────────────────────────
+    # -- CARREGAR LOG ----------------------------------------------------------
 
     def load_log(self):
         self._all_lines.clear()
@@ -308,7 +305,7 @@ class PageLog(QWidget):
         total = len(self._all_lines)
         self._alert.set_text(f"Arquivo: {log.log_path}  —  {total} linha(s)")
 
-    # ── EXPORT ────────────────────────────────────────────────────────────────
+    # -- EXPORT ----------------------------------------------------------------
 
     def _export_log(self):
         ts    = datetime.now().strftime("%Y%m%d_%H%M%S")

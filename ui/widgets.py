@@ -9,14 +9,12 @@
 #   - make_btn_row: parâmetro back_fn removido (use back=)
 # Melhorias v9:
 #   - ProgressBlock.set_progress(): alias de update() para compatibilidade
-#     com page_backup_gbak.py e page_port_opener.py (corrige AttributeError crítico)
 # Melhorias v10:
-#   - ConfirmDialog: diálogo de confirmação centralizado — substitui as 3
-#     implementações duplicadas de _ConfirmDialog em page_atualizacao,
-#     page_backup_gbak e page_port_opener
+#   - ConfirmDialog centralizado
 # Melhorias v11:
-#   - RadioRow._upd: QRadioButton estilizado via stylesheet (indicator customizado)
-#     → corrige radio button quebrado/quadrado no Windows
+#   - RadioRow._upd: QRadioButton estilizado via stylesheet
+# Melhorias v12:
+#   - LogConsole: SizePolicy expandindo corretamente (sem max_height fixo)
 # =============================================================================
 
 import html
@@ -41,10 +39,6 @@ def hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
 
 
 def card_style(state: str, selected: bool) -> tuple[str, str]:
-    """
-    Retorna (bg, border) para cards de seleção com três estados.
-    Centraliza a lógica duplicada em ServerItem, BackupItem, ToggleRow e RadioRow.
-    """
     if selected:
         return COLORS["accent_dim"], COLORS["accent"]
     elif state == "hover":
@@ -71,7 +65,6 @@ def label(text: str, color: str = None, size: int = 13,
 
 
 class HLine(QFrame):
-    """Linha horizontal que acompanha trocas de tema."""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFrameShape(QFrame.Shape.HLine)
@@ -84,7 +77,6 @@ class HLine(QFrame):
 
 
 def h_line() -> "HLine":
-    """Retorna uma HLine que reage a mudanças de tema."""
     return HLine()
 
 
@@ -96,11 +88,6 @@ def spacer(w: int = 0, h: int = 0) -> QWidget:
 
 
 def make_btn_row(btns_def: list, back=None) -> QWidget:
-    """
-    Cria uma linha padronizada de botões.
-    btns_def: lista de (text, class, fn)
-    back: callable para botão '← VOLTAR' (opcional)
-    """
     row = QHBoxLayout()
     row.setSpacing(8)
     for text, cls, fn in btns_def:
@@ -357,7 +344,6 @@ class ProgressBlock(QWidget):
             self.sub_lbl.setText(sub)
 
     def set_progress(self, value: int, name: str = None, sub: str = None):
-        """Alias de update() — mantém compatibilidade com page_backup_gbak e page_port_opener."""
         self.update(value, name, sub)
 
 
@@ -367,23 +353,47 @@ LOG_CONSOLE_MAX_LINES = 500
 
 
 class LogConsole(QTextEdit):
-    def __init__(self, max_height: int = 200, max_lines: int = LOG_CONSOLE_MAX_LINES,
+    """
+    Console de log com rolagem automática.
+    Por padrão expande para preencher o espaço disponível no layout.
+    Passe max_height > 0 apenas quando quiser limitar a altura (ex: consoles inline).
+    """
+
+    def __init__(self, max_height: int = 0, max_lines: int = LOG_CONSOLE_MAX_LINES,
                  parent=None):
         super().__init__(parent)
         self.setReadOnly(True)
-        if max_height:
-            self.setMaximumHeight(max_height)
         self.setFont(QFont(FONT_MONO, 11))
         self.document().setMaximumBlockCount(max_lines)
+
+        if max_height and max_height > 0:
+            # Altura limitada (uso inline em outras páginas)
+            self.setMaximumHeight(max_height)
+            self.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Fixed,
+            )
+        else:
+            # Expande para preencher todo o espaço disponível
+            self.setMinimumHeight(120)
+            self.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Expanding,
+            )
+
         self._upd_bg()
         theme_manager.theme_changed.connect(self._upd_bg)
 
     def _upd_bg(self, _mode: str = ""):
-        bg = "#fafafa" if theme_manager.mode == "light" else "#1c1c1c"
+        bg = "#FAFAFA" if theme_manager.mode == "light" else "#111111"
         self.setStyleSheet(
-            f"background: {bg}; border: 1px solid {COLORS['border']};"
-            f"color: {COLORS['text_mid']}; font-family: Consolas; font-size: 11px;"
-            f"padding: 10px 14px; border-radius: 4px;"
+            f"background: {bg};"
+            f"border: 1px solid {COLORS['border']};"
+            f"color: {COLORS['text_mid']};"
+            f"font-family: Consolas;"
+            f"font-size: 11px;"
+            f"padding: 10px 14px;"
+            f"border-radius: 4px;"
         )
 
     def _log_color(self, kind: str) -> str:
@@ -411,7 +421,6 @@ class LogConsole(QTextEdit):
 # ── SERVER ITEM ───────────────────────────────────────────────────────────────
 
 class ServerItem(QWidget):
-    """Card de servidor. Emite selected(self) ao clicar."""
     selected = pyqtSignal(object)
 
     def __init__(self, hostname: str, ip: str, path: str,
@@ -824,12 +833,6 @@ class DestPanel(QWidget):
 # ── RADIO ROW ─────────────────────────────────────────────────────────────────
 
 class RadioRow(QWidget):
-    """
-    Card clicável com radio button.
-    Mesmo estilo visual dos ToggleRow de page_scan.
-    Usado nos Modos 02 e 03 — centralizado aqui para evitar duplicação.
-    """
-
     def __init__(self, text: str, desc: str, checked: bool = False, parent=None):
         super().__init__(parent)
         self._state = "normal"
@@ -909,8 +912,7 @@ class RadioRow(QWidget):
                 border: none;
             }}
             QRadioButton::indicator {{
-                width: 16px;
-                height: 16px;
+                width: 16px; height: 16px;
                 border-radius: 8px;
                 border: 2px solid {COLORS['border']};
                 background: transparent;
