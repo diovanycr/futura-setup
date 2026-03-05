@@ -432,8 +432,13 @@ class FooterWidget(QWidget):
         self._ver_lbl = QLabel(f"v{APP_VERSION}")
         self._ver_lbl.setFont(QFont(FONT_SANS, 10))
 
+        self._dev_lbl = QLabel("dev by Diovany C. Rodrigues")
+        self._dev_lbl.setFont(QFont(FONT_SANS, 9))
+        self._dev_lbl.setAlignment(Qt.AlignmentFlag.AlignLeft)
+
         lay.addWidget(row_w)
         lay.addWidget(self._ver_lbl)
+        lay.addWidget(self._dev_lbl)
 
         self._upd()
         theme_manager.theme_changed.connect(self._upd)
@@ -443,6 +448,7 @@ class FooterWidget(QWidget):
         self._admin_dot.setStyleSheet(f"background: {dot_color}; border-radius: 4px;")
         self._admin_st.setStyleSheet(f"color: {COLORS['text_mid']}; background: transparent;")
         self._ver_lbl.setStyleSheet(f"color: {COLORS['text_dim']}; background: transparent;")
+        self._dev_lbl.setStyleSheet(f"color: {COLORS['text_dim']}; background: transparent;")
 
 
 # ── SIDEBAR ───────────────────────────────────────────────────────────────────
