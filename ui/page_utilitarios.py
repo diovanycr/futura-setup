@@ -1,5 +1,5 @@
 # =============================================================================
-# FUTURA SETUP — Página: Menu Principal
+# FUTURA SETUP — Página: Utilitários
 # =============================================================================
 
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
@@ -12,10 +12,6 @@ from ui.theme_manager import theme_manager
 
 
 class ActionButton(QWidget):
-    """
-    Card de ação do menu principal.
-    Emite clicked() ao ser pressionado.
-    """
     clicked = pyqtSignal()
 
     def __init__(self, number: str, title: str, description: str,
@@ -133,12 +129,15 @@ class ActionButton(QWidget):
                 self.clicked.emit()
 
 
-class PageMenu(QWidget):
-    go_atalhos     = pyqtSignal()
-    go_terminal    = pyqtSignal()
-    go_atualizacao = pyqtSignal()
-    go_log         = pyqtSignal()
-    go_restaurar   = pyqtSignal()
+class PageUtilitarios(QWidget):
+    go_menu            = pyqtSignal()
+    go_log             = pyqtSignal()
+    go_backup_gbak     = pyqtSignal()
+    go_port_opener     = pyqtSignal()
+    go_diagnostico     = pyqtSignal()
+    go_editar_func     = pyqtSignal()
+    go_implantar_mobile = pyqtSignal()
+    go_shutdown_online  = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -146,22 +145,34 @@ class PageMenu(QWidget):
         lay.setContentsMargins(40, 36, 40, 36)
         lay.setSpacing(0)
 
-        lay.addWidget(PageTitle("FUTURA SETUP", "Menu Principal"))
+        lay.addWidget(PageTitle("UTILITÁRIOS", "Ferramentas auxiliares do sistema"))
 
         btn_lay = QVBoxLayout()
         btn_lay.setSpacing(12)
         btn_lay.setContentsMargins(0, 8, 0, 0)
 
         items = [
-            ("01", "Puxar via Rede",
-             "Cria atalhos que executam os aplicativos direto do servidor",
-             COLORS["accent"],  self.go_atalhos),
-            ("02", "Novo Terminal",
-             "Copia os arquivos para este PC e configura um terminal autônomo",
-             COLORS["accent"],  self.go_terminal),
-            ("03", "Atualizar Sistema",
-             "Baixa e executa a atualização completa do ERP Futura",
-             COLORS["accent"],  self.go_atualizacao),
+            ("01", "Ver Log",
+             "Visualiza o histórico de operações e eventos do sistema",
+             COLORS["accent2"],  self.go_log),
+            ("02", "Backup / Restaurar DB",
+             "Gera ou restaura backup do banco de dados Firebird (.gbak)",
+             COLORS["accent2"],  self.go_backup_gbak),
+            ("03", "Firewall — Portas",
+             "Abre ou fecha portas no firewall do Windows",
+             COLORS["accent2"],  self.go_port_opener),
+            ("04", "Diagnóstico",
+             "Testa conectividade, share, Firebird e versão de um servidor",
+             COLORS["accent2"],  self.go_diagnostico),
+            ("05", "Editar Funcionário",
+             "Altera dados de login e senha de funcionários no banco",
+             COLORS["accent2"],  self.go_editar_func),
+            ("06", "Implantar Mobile",
+             "Configura e implanta o módulo mobile no servidor",
+             COLORS["accent2"],  self.go_implantar_mobile),
+            ("07", "Shutdown / Online",
+             "Encerra ou coloca o sistema online remotamente",
+             COLORS["accent2"],  self.go_shutdown_online),
         ]
 
         for num, title, desc, accent, sig in items:

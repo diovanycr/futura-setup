@@ -33,6 +33,7 @@ from ui.page_diagnostico        import PageDiagnostico
 from ui.page_editar_funcionario import PageEditarFuncionario
 from ui.page_implantar_mobile   import PageImplantarMobile
 from ui.page_shutdown_online    import PageShutdownOnline
+from ui.page_utilitarios        import PageUtilitarios
 from core.logger                import log
 from config                     import APP_VERSION
 
@@ -467,6 +468,7 @@ class Sidebar(QWidget):
         inner_lay.setContentsMargins(8, 0, 8, 12)
         inner_lay.setSpacing(1)
 
+        # ── Header ──
         header = QWidget()
         header.setStyleSheet("background: transparent;")
         header_lay = QVBoxLayout(header)
@@ -486,9 +488,13 @@ class Sidebar(QWidget):
         inner_lay.addWidget(self._div_top)
         inner_lay.addWidget(spacer(h=4))
 
-        self.nav_menu = NavItem("Menu Principal", "⊞")
+        # ── Navegação principal ──
+        self.nav_menu        = NavItem("Menu Principal",   "⊞")
+        self.nav_utilitarios = NavItem("Utilitários",      "🔧")
         inner_lay.addWidget(self.nav_menu)
+        inner_lay.addWidget(self.nav_utilitarios)
 
+        # ── Seção Operações ──
         inner_lay.addWidget(NavSectionLabel("Operações"))
         self.nav_atalhos     = NavItem("Puxar via Rede",    "↓")
         self.nav_terminal    = NavItem("Novo Terminal",     "□")
@@ -497,27 +503,12 @@ class Sidebar(QWidget):
         inner_lay.addWidget(self.nav_terminal)
         inner_lay.addWidget(self.nav_atualizacao)
 
-        inner_lay.addWidget(NavSectionLabel("Utilitários"))
-        self.nav_log             = NavItem("Ver Log",             "≡")
-        self.nav_backup_gbak     = NavItem("Backup/Restaure DB",  "💾")
-        self.nav_port_opener     = NavItem("Firewall — Portas",   "🔓")
-        self.nav_diagnostico     = NavItem("Diagnóstico",         "🔍")
-        self.nav_editar_func     = NavItem("Editar Funcionário",  "✏️")
-        self.nav_implantar_mobile  = NavItem("Implantar Mobile",   "📱")
-        self.nav_shutdown_online   = NavItem("Shutdown / Online",  "⏻")
-        inner_lay.addWidget(self.nav_log)
-        inner_lay.addWidget(self.nav_backup_gbak)
-        inner_lay.addWidget(self.nav_port_opener)
-        inner_lay.addWidget(self.nav_diagnostico)
-        inner_lay.addWidget(self.nav_editar_func)
-        inner_lay.addWidget(self.nav_implantar_mobile)
-        inner_lay.addWidget(self.nav_shutdown_online)
-
         self.nav_atalhos.set_enabled(False)
         self.nav_terminal.set_enabled(False)
 
         inner_lay.addStretch()
 
+        # ── Rodapé ──
         self._div_bot = self._make_divider()
         inner_lay.addWidget(self._div_bot)
         inner_lay.addWidget(spacer(h=4))
@@ -531,12 +522,10 @@ class Sidebar(QWidget):
         root.addWidget(self._inner, 1)
         root.addWidget(self._border)
 
+        # Lista de todos os nav items para controle de active
         self._all = [
-            self.nav_menu, self.nav_atalhos, self.nav_terminal,
-            self.nav_atualizacao, self.nav_log,
-            self.nav_backup_gbak, self.nav_port_opener, self.nav_diagnostico,
-            self.nav_editar_func, self.nav_implantar_mobile,
-            self.nav_shutdown_online,
+            self.nav_menu, self.nav_utilitarios,
+            self.nav_atalhos, self.nav_terminal, self.nav_atualizacao,
         ]
 
         self._upd()
@@ -569,19 +558,20 @@ class Sidebar(QWidget):
 
 # ── MAIN WINDOW ───────────────────────────────────────────────────────────────
 
-_IDX_MENU             = 0
-_IDX_SCAN             = 1
-_IDX_ATALHOS          = 2
-_IDX_TERMINAL         = 3
-_IDX_RESTAURAR        = 4
-_IDX_LOG              = 5
-_IDX_ATUALIZACAO      = 6
-_IDX_BACKUP_GBAK      = 7
-_IDX_PORT_OPENER      = 8
-_IDX_DIAGNOSTICO      = 9
-_IDX_EDITAR_FUNC      = 10
+_IDX_MENU              = 0
+_IDX_SCAN              = 1
+_IDX_ATALHOS           = 2
+_IDX_TERMINAL          = 3
+_IDX_RESTAURAR         = 4
+_IDX_LOG               = 5
+_IDX_ATUALIZACAO       = 6
+_IDX_BACKUP_GBAK       = 7
+_IDX_PORT_OPENER       = 8
+_IDX_DIAGNOSTICO       = 9
+_IDX_EDITAR_FUNC       = 10
 _IDX_IMPLANTAR_MOBILE  = 11
 _IDX_SHUTDOWN_ONLINE   = 12
+_IDX_UTILITARIOS       = 13
 
 
 class MainWindow(QMainWindow):
@@ -617,6 +607,7 @@ class MainWindow(QMainWindow):
         self._page_editar_func      = PageEditarFuncionario()
         self._page_implantar_mobile  = PageImplantarMobile()
         self._page_shutdown_online   = PageShutdownOnline()
+        self._page_utilitarios       = PageUtilitarios()
 
         for p in [
             self._page_menu,             # 0
@@ -632,48 +623,47 @@ class MainWindow(QMainWindow):
             self._page_editar_func,      # 10
             self._page_implantar_mobile,  # 11
             self._page_shutdown_online,   # 12
+            self._page_utilitarios,       # 13
         ]:
             self._stack.addWidget(p)
 
-        # ── Sinais do menu ──
+        # ── Sinais do menu principal ──
         self._page_menu.go_atalhos.connect(self._start_atalhos)
         self._page_menu.go_terminal.connect(self._start_terminal)
         self._page_menu.go_atualizacao.connect(self._go_atualizacao)
         self._page_menu.go_restaurar.connect(self._go_restaurar)
         self._page_menu.go_log.connect(self._go_log)
-        self._page_menu.go_diagnostico.connect(self._go_diagnostico)
+
+        # ── Sinais da página Utilitários ──
+        self._page_utilitarios.go_log.connect(self._go_log)
+        self._page_utilitarios.go_backup_gbak.connect(self._go_backup_gbak)
+        self._page_utilitarios.go_port_opener.connect(self._go_port_opener)
+        self._page_utilitarios.go_diagnostico.connect(self._go_diagnostico)
+        self._page_utilitarios.go_editar_func.connect(self._go_editar_func)
+        self._page_utilitarios.go_implantar_mobile.connect(self._go_implantar_mobile)
+        self._page_utilitarios.go_shutdown_online.connect(self._go_shutdown_online)
 
         # ── Sinais do scan ──
         self._page_scan.servidor_selecionado.connect(self._on_servidor)
         self._page_scan.cancelado.connect(self._go_menu)
 
-        # ── Sinais de retorno ──
+        # ── Sinais de retorno (go_menu) ──
         self._page_atalhos.go_menu.connect(self._go_menu)
         self._page_terminal.go_menu.connect(self._go_menu)
         self._page_restaurar.go_menu.connect(self._go_menu)
         self._page_log.go_menu.connect(self._go_menu)
         self._page_atualizacao.go_menu.connect(self._go_menu)
-        self._page_backup_gbak.go_menu.connect(self._go_menu)
-        self._page_port_opener.go_menu.connect(self._go_menu)
-        self._page_diagnostico.go_menu.connect(self._go_menu)
-        self._page_editar_func.go_menu.connect(self._go_menu)
-        self._page_implantar_mobile.go_menu.connect(self._go_menu)
-        self._page_shutdown_online.go_menu.connect(self._go_menu)
+        self._page_backup_gbak.go_menu.connect(self._go_utilitarios)
+        self._page_port_opener.go_menu.connect(self._go_utilitarios)
+        self._page_diagnostico.go_menu.connect(self._go_utilitarios)
+        self._page_editar_func.go_menu.connect(self._go_utilitarios)
+        self._page_implantar_mobile.go_menu.connect(self._go_utilitarios)
+        self._page_shutdown_online.go_menu.connect(self._go_utilitarios)
 
         # ── Sidebar clicks ──
         self._sidebar.nav_menu.on_click(lambda: self._navigate(self._go_menu))
-        self._sidebar.nav_log.on_click(lambda: self._navigate(self._go_log))
+        self._sidebar.nav_utilitarios.on_click(lambda: self._navigate(self._go_utilitarios))
         self._sidebar.nav_atualizacao.on_click(lambda: self._navigate(self._go_atualizacao))
-        self._sidebar.nav_backup_gbak.on_click(lambda: self._navigate(self._go_backup_gbak))
-        self._sidebar.nav_port_opener.on_click(lambda: self._navigate(self._go_port_opener))
-        self._sidebar.nav_diagnostico.on_click(lambda: self._navigate(self._go_diagnostico))
-        self._sidebar.nav_editar_func.on_click(lambda: self._navigate(self._go_editar_func))
-        self._sidebar.nav_implantar_mobile.on_click(
-            lambda: self._navigate(self._go_implantar_mobile)
-        )
-        self._sidebar.nav_shutdown_online.on_click(
-            lambda: self._navigate(self._go_shutdown_online)
-        )
         self._sidebar.nav_atalhos.on_click(
             lambda: self._navigate(
                 lambda: self._show(_IDX_ATALHOS, self._sidebar.nav_atalhos)
@@ -765,11 +755,11 @@ class MainWindow(QMainWindow):
                 self._page_atalhos:          self._sidebar.nav_atalhos,
                 self._page_terminal:         self._sidebar.nav_terminal,
                 self._page_atualizacao:      self._sidebar.nav_atualizacao,
-                self._page_backup_gbak:      self._sidebar.nav_backup_gbak,
-                self._page_port_opener:      self._sidebar.nav_port_opener,
-                self._page_editar_func:      self._sidebar.nav_editar_func,
-                self._page_implantar_mobile: self._sidebar.nav_implantar_mobile,
-                self._page_shutdown_online:  self._sidebar.nav_shutdown_online,
+                self._page_backup_gbak:      self._sidebar.nav_utilitarios,
+                self._page_port_opener:      self._sidebar.nav_utilitarios,
+                self._page_editar_func:      self._sidebar.nav_utilitarios,
+                self._page_implantar_mobile: self._sidebar.nav_utilitarios,
+                self._page_shutdown_online:  self._sidebar.nav_utilitarios,
             }
         return self._page_nav_map
 
@@ -805,9 +795,12 @@ class MainWindow(QMainWindow):
     def _go_menu(self):
         self._show(_IDX_MENU, self._sidebar.nav_menu)
 
+    def _go_utilitarios(self):
+        self._show(_IDX_UTILITARIOS, self._sidebar.nav_utilitarios)
+
     def _go_log(self):
         self._page_log.load_log()
-        self._show(_IDX_LOG, self._sidebar.nav_log)
+        self._show(_IDX_LOG, self._sidebar.nav_utilitarios)
 
     def _go_restaurar(self):
         self._page_restaurar.load_backups()
@@ -819,27 +812,27 @@ class MainWindow(QMainWindow):
 
     def _go_backup_gbak(self):
         self._page_backup_gbak.reset()
-        self._show(_IDX_BACKUP_GBAK, self._sidebar.nav_backup_gbak)
+        self._show(_IDX_BACKUP_GBAK, self._sidebar.nav_utilitarios)
 
     def _go_port_opener(self):
         self._page_port_opener.reset()
-        self._show(_IDX_PORT_OPENER, self._sidebar.nav_port_opener)
+        self._show(_IDX_PORT_OPENER, self._sidebar.nav_utilitarios)
 
     def _go_diagnostico(self):
         self._page_diagnostico.reset()
-        self._show(_IDX_DIAGNOSTICO, self._sidebar.nav_diagnostico)
+        self._show(_IDX_DIAGNOSTICO, self._sidebar.nav_utilitarios)
 
     def _go_editar_func(self):
         self._page_editar_func.reset()
-        self._show(_IDX_EDITAR_FUNC, self._sidebar.nav_editar_func)
+        self._show(_IDX_EDITAR_FUNC, self._sidebar.nav_utilitarios)
 
     def _go_implantar_mobile(self):
         self._page_implantar_mobile.reset()
-        self._show(_IDX_IMPLANTAR_MOBILE, self._sidebar.nav_implantar_mobile)
+        self._show(_IDX_IMPLANTAR_MOBILE, self._sidebar.nav_utilitarios)
 
     def _go_shutdown_online(self):
         self._page_shutdown_online.reset()
-        self._show(_IDX_SHUTDOWN_ONLINE, self._sidebar.nav_shutdown_online)
+        self._show(_IDX_SHUTDOWN_ONLINE, self._sidebar.nav_utilitarios)
 
     def _start_atalhos(self):
         self._flow_mode = "atalhos"
