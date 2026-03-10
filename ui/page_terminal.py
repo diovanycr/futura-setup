@@ -21,16 +21,17 @@ import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
     QLabel, QLineEdit, QScrollArea, QButtonGroup, QRadioButton,
-    QGridLayout, QFileDialog, QPushButton,
+    QGridLayout, QFileDialog, QPushButton, QFrame, QDialog,
 )
-from PyQt6.QtCore import pyqtSignal, Qt, QByteArray, QRectF
+from PyQt6.QtCore import pyqtSignal, Qt, QByteArray, QRectF, pyqtProperty, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QFont, QIcon, QPixmap, QPainter, QColor
 from PyQt6.QtSvg import QSvgRenderer
 
 from ui.widgets import (
     PageTitle, SectionHeader, AlertBox, ResultBox, ProgressBlock,
     LogConsole, StepIndicator, MiniFileItem, DestPanel, RadioRow,
-    make_btn, spacer, label
+    CustomPathCard, ProcessCard, FadeStackedWidget, make_primary_btn,
+    make_secondary_btn, btn_row, spacer, label, card_style
 )
 from ui.theme import COLORS, FONT_MONO, FONT_SANS
 from ui.theme_manager import theme_manager
@@ -45,75 +46,6 @@ STEP_NAMES = ["Pasta", "Resumo", "Processos", "Backup", "Servidor",
               "Arquivos", "DLLs", "Atalhos"]
 
 
-# ── HELPERS DE BOTÃO ─────────────────────────────────────────────────────────
-
-def _make_primary_btn(text: str, min_width: int = 180) -> QPushButton:
-    btn = QPushButton(text)
-    btn.setMinimumWidth(min_width)
-    btn.setMinimumHeight(36)
-    btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    btn.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
-    _apply_primary(btn)
-    theme_manager.theme_changed.connect(lambda _: _apply_primary(btn))
-    return btn
-
-def _make_secondary_btn(text: str, min_width: int = 120) -> QPushButton:
-    btn = QPushButton(text)
-    btn.setMinimumWidth(min_width)
-    btn.setMinimumHeight(36)
-    btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    _apply_secondary(btn)
-    theme_manager.theme_changed.connect(lambda _: _apply_secondary(btn))
-    return btn
-
-def _apply_primary(btn: QPushButton):
-    text_color = "#ffffff" if theme_manager.mode == "light" else "#001826"
-    btn.setStyleSheet(f"""
-        QPushButton {{
-            background-color: {COLORS["accent"]};
-            color: {text_color};
-            border: none;
-            border-radius: 6px;
-            padding: 8px 20px;
-            font-weight: 700;
-            font-size: 13px;
-        }}
-        QPushButton:hover {{ background-color: {COLORS["accent_hover"]}; }}
-        QPushButton:pressed {{ background-color: {COLORS["accent_press"]}; }}
-        QPushButton:disabled {{
-            background-color: {COLORS["panel_hover"]};
-            color: {COLORS["text_disabled"]};
-        }}
-    """)
-
-def _apply_secondary(btn: QPushButton):
-    btn.setStyleSheet(f"""
-        QPushButton {{
-            background-color: transparent;
-            color: {COLORS["text"]};
-            border: 1.5px solid {COLORS["btn_border"]};
-            border-radius: 6px;
-            padding: 8px 20px;
-            font-size: 13px;
-        }}
-        QPushButton:hover {{
-            background-color: {COLORS["panel_hover"]};
-            border-color: {COLORS["text_dim"]};
-        }}
-        QPushButton:pressed {{ background-color: {COLORS["panel_press"]}; }}
-    """)
-
-def _btn_row(*btns) -> QWidget:
-    """Cria uma linha de botões alinhada à esquerda."""
-    row = QHBoxLayout()
-    row.setSpacing(10)
-    for btn in btns:
-        row.addWidget(btn)
-    row.addStretch()
-    w = QWidget()
-    w.setLayout(row)
-    w.setStyleSheet("background: transparent;")
-    return w
 
 
 class PageTerminal(QWidget):
@@ -132,12 +64,13 @@ class PageTerminal(QWidget):
         lay.setSpacing(0)
 
         lay.addWidget(PageTitle("TERMINAL", "Novo Terminal"))
+        self._search_text = ""
 
         self._step_ind = StepIndicator(STEP_NAMES)
         lay.addWidget(self._step_ind)
         lay.addWidget(spacer(h=12))
 
-        self._stack = QStackedWidget()
+        self._stack = FadeStackedWidget()
         self._stack.setStyleSheet("background: transparent;")
         lay.addWidget(self._stack)
 
@@ -177,131 +110,35 @@ class PageTerminal(QWidget):
             lay.addWidget(row)
             self._radio_rows.append(row)
 
+        lay.addWidget(spacer(h=4))
+
         # Opção personalizada
-        self._custom_row = QWidget()
-        self._custom_row.setObjectName("CustomRow")
-        self._upd_custom_style(False)
+        self._custom_card = CustomPathCard("Outro caminho")
+        self._pasta_group.addButton(self._custom_card.radio(), 2)
+        self._custom_card.btn_folder().clicked.connect(self._abrir_explorer)
+        self._custom_card.input_field().mousePressEvent = lambda _: self._abrir_explorer()
+        lay.addWidget(self._custom_card)
 
-        c_lay = QHBoxLayout(self._custom_row)
-        c_lay.setContentsMargins(20, 12, 16, 12)
-        c_lay.setSpacing(14)
+        lay.addWidget(spacer(h=24))
 
-        custom_info_lay = QVBoxLayout()
-        custom_info_lay.setSpacing(4)
-        custom_title = QLabel("Outro caminho")
-        custom_title.setFont(QFont(FONT_MONO, 12, QFont.Weight.Bold))
-        custom_title.setStyleSheet(f"color: {COLORS['text']}; background: transparent;")
-        self._custom_input = QLineEdit()
-        self._custom_input.setPlaceholderText("Clique para selecionar a pasta...")
-        self._custom_input.setMaximumWidth(340)
-        self._custom_input.setReadOnly(True)
-        self._custom_input.setCursor(Qt.CursorShape.PointingHandCursor)
-
-        def _abrir_explorer():
-            self._custom_radio.setChecked(True)
-            pasta_atual = self._custom_input.text().strip() or "C:\\"
-            pasta = QFileDialog.getExistingDirectory(None, "Selecionar pasta de instalação", pasta_atual)
-            if pasta:
-                self._custom_input.setText(pasta.replace("/", "\\"))
-
-        _orig_press = self._custom_input.mousePressEvent
-        def _custom_press(e):
-            if e.button() == Qt.MouseButton.LeftButton:
-                _abrir_explorer()
-            else:
-                _orig_press(e)
-        self._custom_input.mousePressEvent = _custom_press
-
-        custom_info_lay.addWidget(custom_title)
-        custom_info_lay.addWidget(self._custom_input)
-        custom_info_w = QWidget()
-        custom_info_w.setLayout(custom_info_lay)
-        custom_info_w.setStyleSheet("background: transparent;")
-
-        # Radio button mantido invisível para controle lógico do grupo
-        self._custom_radio = QRadioButton()
-        self._custom_radio.setVisible(False)
-        self._pasta_group.addButton(self._custom_radio, 2)
-        self._custom_radio.toggled.connect(self._upd_custom_style)
-
-        # Botão de pasta visível substituindo o radio button
-        self._btn_pasta = QPushButton()
-        self._btn_pasta.setFixedSize(40, 40)
-        self._btn_pasta.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._btn_pasta.setToolTip("Selecionar pasta de instalação")
-        self._apply_btn_pasta_style()
-        self._btn_pasta.clicked.connect(_abrir_explorer)
-        theme_manager.theme_changed.connect(lambda _: self._apply_btn_pasta_style())
-
-        c_lay.addWidget(custom_info_w, 1)
-        c_lay.addWidget(self._custom_radio)  # invisível, mantido no layout
-        c_lay.addWidget(self._btn_pasta)
-        lay.addWidget(self._custom_row)
-
-        lay.addWidget(spacer(h=16))
-
-        btn_proximo = _make_primary_btn("▶  PRÓXIMO", 180)
+        # Botões
+        btn_proximo = make_primary_btn("▶  PRÓXIMO", 180)
         btn_proximo.clicked.connect(self._confirm_pasta)
-        btn_voltar = _make_secondary_btn("← VOLTAR", 120)
+        btn_voltar = make_secondary_btn("← VOLTAR", 120)
         btn_voltar.clicked.connect(self.go_menu.emit)
 
-        # Botões centralizados logo abaixo do "Outro caminho"
-        btns_lay = QHBoxLayout()
-        btns_lay.setSpacing(10)
-        btns_lay.addStretch()
-        btns_lay.addWidget(btn_proximo)
-        btns_lay.addWidget(btn_voltar)
-        btns_lay.addStretch()
-        btns_w = QWidget()
-        btns_w.setLayout(btns_lay)
-        btns_w.setStyleSheet("background: transparent;")
-        lay.addWidget(btns_w)
+        lay.addWidget(btn_row(btn_proximo, btn_voltar))
         lay.addStretch()
-
-        theme_manager.theme_changed.connect(
-            lambda _: self._upd_custom_style(self._custom_radio.isChecked())
-        )
         return w
 
-    def _apply_btn_pasta_style(self):
-        # SVG de pasta limpo, cor branca
-        svg = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
-              stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-        </svg>"""
-        renderer = QSvgRenderer(QByteArray(svg))
-        pixmap = QPixmap(28, 28)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(pixmap)
-        renderer.render(painter, QRectF(0, 0, 28, 28))
-        painter.end()
-        self._btn_pasta.setIcon(QIcon(pixmap))
-        self._btn_pasta.setIconSize(pixmap.size())
-        self._btn_pasta.setStyleSheet(f"""
-            QPushButton {{
-                background: {COLORS['accent']};
-                border: none;
-                border-radius: 8px;
-                padding: 0px;
-            }}
-            QPushButton:hover {{
-                background: {COLORS['accent_hover']};
-            }}
-            QPushButton:pressed {{
-                background: {COLORS['accent_press']};
-            }}
-        """)
+    def _abrir_explorer(self):
+        self._custom_card.radio().setChecked(True)
+        pasta_atual = self._custom_card.path().strip() or "C:\\"
+        pasta = QFileDialog.getExistingDirectory(None, "Selecionar pasta de instalação", pasta_atual)
+        if pasta:
+            self._custom_card.set_path(pasta.replace("/", "\\"))
 
-    def _upd_custom_style(self, checked):
-        bg     = COLORS["accent_dim"] if checked else COLORS["surface"]
-        border = COLORS["accent"]     if checked else COLORS["border"]
-        self._custom_row.setStyleSheet(
-            f"QWidget#CustomRow {{"
-            f"  background: {bg};"
-            f"  border: 1.5px solid {border};"
-            f"  border-radius: 8px;"
-            f"}}"
-        )
+
 
     def _confirm_pasta(self):
         idx = self._pasta_group.checkedId()
@@ -310,13 +147,11 @@ class PageTerminal(QWidget):
         elif idx == 1:
             self._pasta = "C:\\FuturaTerminal"
         else:
-            custom = self._custom_input.text().strip()
+            custom = self._custom_card.path().strip()
             if not custom:
-                pasta = QFileDialog.getExistingDirectory(None, "Selecionar pasta de instalação", "C:\\")
-                if not pasta:
-                    return
-                custom = pasta.replace("/", "\\")
-                self._custom_input.setText(custom)
+                self._abrir_explorer()
+                custom = self._custom_card.path().strip()
+                if not custom: return
             self._pasta = custom.rstrip("\\")
         self._update_resumo()
         self._go_step(1)
@@ -332,68 +167,67 @@ class PageTerminal(QWidget):
 
         lay.addWidget(SectionHeader("Resumo da Operação"))
 
-        self._resumo_box = QWidget()
-        self._resumo_box.setObjectName("ResumoBox")
-        self._refresh_resumo_style()
-
-        resumo_lay = QVBoxLayout(self._resumo_box)
-        resumo_lay.setContentsMargins(20, 16, 20, 16)
-        resumo_lay.setSpacing(8)
-
-        self._resumo_labels = {}
-        for campo in ["Modo", "Servidor", "Caminho", "Pasta", "Espaço Livre"]:
-            row_w = QWidget()
-            row_w.setStyleSheet("background: transparent;")
-            row = QHBoxLayout(row_w)
-            row.setContentsMargins(0, 0, 0, 0)
-            row.setSpacing(16)
-            k = QLabel(campo.upper())
-            k.setFont(QFont(FONT_MONO, 10))
-            k.setStyleSheet(f"color: {COLORS['text_dim']}; background: transparent;")
-            k.setFixedWidth(120)
-            v = QLabel("—")
-            v.setFont(QFont(FONT_MONO, 12))
-            v.setStyleSheet(f"color: {COLORS['text']}; background: transparent;")
-            v.setWordWrap(True)
-            self._resumo_labels[campo] = v
-            row.addWidget(k)
-            row.addWidget(v, 1)
-            resumo_lay.addWidget(row_w)
-
-        lay.addWidget(self._resumo_box)
-        lay.addWidget(spacer(h=16))
-
-        btn_confirmar = _make_primary_btn("✓  CONFIRMAR E CONTINUAR", 220)
-        btn_confirmar.clicked.connect(lambda: self._go_step(2))
-        btn_voltar = _make_secondary_btn("← VOLTAR", 120)
-        btn_voltar.clicked.connect(lambda: self._go_step(0))
-        lay.addWidget(_btn_row(btn_confirmar, btn_voltar))
-
-        lay.addStretch()
-
-        theme_manager.theme_changed.connect(self._refresh_resumo_style)
-        return w
-
-    def _refresh_resumo_style(self, _mode: str = ""):
-        self._resumo_box.setStyleSheet(f"""
-            QWidget#ResumoBox {{
+        self._resumo_card = QFrame()
+        self._resumo_card.setObjectName("ResumoCard")
+        self._resumo_card.setStyleSheet(f"""
+            QFrame#ResumoCard {{
                 background: {COLORS['surface']};
                 border: 1px solid {COLORS['border']};
                 border-radius: 8px;
             }}
         """)
+        
+        res_lay = QGridLayout(self._resumo_card)
+        res_lay.setContentsMargins(24, 20, 24, 20)
+        res_lay.setSpacing(16)
+
+        self._resumo_labels = {}
+        campos = [
+            ("Modo", "TERMINAL"),
+            ("Servidor", "—"),
+            ("Caminho", "—"),
+            ("Pasta", "—"),
+            ("Espaço Livre", "—"),
+        ]
+
+        for i, (k, v_init) in enumerate(campos):
+            kl = QLabel(k.upper())
+            kl.setFont(QFont(FONT_MONO, 10, QFont.Weight.Bold))
+            kl.setStyleSheet(f"color: {COLORS['text_dim']}; background: transparent;")
+            
+            vl = QLabel(v_init)
+            vl.setFont(QFont(FONT_MONO, 11))
+            vl.setStyleSheet(f"color: {COLORS['text']}; background: transparent;")
+            vl.setWordWrap(True)
+            
+            res_lay.addWidget(kl, i, 0)
+            res_lay.addWidget(vl, i, 1)
+            self._resumo_labels[k] = vl
+
+        lay.addWidget(self._resumo_card)
+        lay.addWidget(spacer(h=16))
+
+        # Botões
+        btn_proximo = make_primary_btn("▶  INICIAR INSTALAÇÃO", 220)
+        btn_proximo.clicked.connect(lambda: self._go_step(2))
+        btn_voltar = make_secondary_btn("← VOLTAR", 120)
+        btn_voltar.clicked.connect(lambda: self._go_step(0))
+
+        lay.addWidget(btn_row(btn_proximo, btn_voltar))
+        lay.addStretch()
+
+        return w
+
 
     def _update_resumo(self):
         if not self._servidor:
             return
         espaco = espaco_livre_mb(self._pasta)
         aviso  = "  ⚠ Pouco espaço!" if espaco < 500 else ""
-        self._resumo_labels["Modo"].setText("Novo Terminal")
-        self._resumo_labels["Servidor"].setText(self._servidor.display)
-        self._resumo_labels["Caminho"].setText(self._servidor.path)
+        self._resumo_labels["Servidor"].setText(self._servidor.nome)
+        self._resumo_labels["Caminho"].setText(self._servidor.caminho)
         self._resumo_labels["Pasta"].setText(self._pasta)
         self._resumo_labels["Espaço Livre"].setText(f"{espaco:.1f} MB disponíveis{aviso}")
-        self._refresh_resumo_style()
 
     # ── STEP 3: Processos em Execução ─────────────────────────────────────────
 
@@ -437,60 +271,20 @@ class PageTerminal(QWidget):
             self._step3_lay.addWidget(spacer(h=4))
 
             for proc in self._processos:
-                card = QWidget()
-                card.setObjectName("ProcCard")
-                card.setFixedHeight(54)
-                card.setStyleSheet(f"""
-                    QWidget#ProcCard {{
-                        background: {COLORS['surface']};
-                        border: 1.5px solid {COLORS['border']};
-                        border-radius: 8px;
-                    }}
-                """)
-                c_lay = QHBoxLayout(card)
-                c_lay.setContentsMargins(16, 0, 16, 0)
-                c_lay.setSpacing(12)
-
-                dot = QWidget()
-                dot.setFixedSize(8, 8)
-                dot.setStyleSheet(
-                    f"background: {COLORS['warn']}; border-radius: 4px; border: none;"
+                card = ProcessCard(
+                    str(proc.get('pid', '?')),
+                    proc.get("name", proc.get("nome", "—")),
+                    proc.get("exe", "")
                 )
-
-                pid_lbl = QLabel(f"PID {proc.get('pid', '?')}")
-                pid_lbl.setFont(QFont(FONT_MONO, 10))
-                pid_lbl.setStyleSheet(f"color: {COLORS['text_dim']}; background: transparent;")
-                pid_lbl.setFixedWidth(72)
-
-                info_lay = QVBoxLayout()
-                info_lay.setSpacing(1)
-                info_lay.setContentsMargins(0, 0, 0, 0)
-                name_lbl = QLabel(proc.get("name", proc.get("nome", "—")))
-                name_lbl.setFont(QFont(FONT_SANS, 12, QFont.Weight.Bold))
-                name_lbl.setStyleSheet(f"color: {COLORS['text']}; background: transparent;")
-                path_lbl = QLabel(proc.get("exe", ""))
-                path_lbl.setFont(QFont(FONT_MONO, 9))
-                path_lbl.setStyleSheet(f"color: {COLORS['text_dim']}; background: transparent;")
-                info_lay.addStretch()
-                info_lay.addWidget(name_lbl)
-                info_lay.addWidget(path_lbl)
-                info_lay.addStretch()
-                info_w = QWidget()
-                info_w.setLayout(info_lay)
-                info_w.setStyleSheet("background: transparent;")
-
-                c_lay.addWidget(dot)
-                c_lay.addWidget(pid_lbl)
-                c_lay.addWidget(info_w, 1)
                 self._step3_lay.addWidget(card)
 
             self._step3_lay.addWidget(spacer(h=16))
 
-            btn_encerrar = _make_primary_btn("⊗  ENCERRAR E CONTINUAR", 220)
+            btn_encerrar = make_primary_btn("⊗  ENCERRAR E CONTINUAR", 220)
             btn_encerrar.clicked.connect(self._encerrar_e_continuar)
-            btn_voltar = _make_secondary_btn("← VOLTAR", 120)
+            btn_voltar = make_secondary_btn("← VOLTAR", 120)
             btn_voltar.clicked.connect(lambda: self._go_step(1))
-            self._step3_lay.addWidget(_btn_row(btn_encerrar, btn_voltar))
+            self._step3_lay.addWidget(btn_row(btn_encerrar, btn_voltar))
 
         self._step3_lay.addStretch()
 
@@ -512,14 +306,47 @@ class PageTerminal(QWidget):
         hdr.setContentsMargins(0, 0, 0, 0)
         hdr.addWidget(SectionHeader("Arquivos para Copiar"))
         hdr.addStretch()
-        btn_all = make_btn("☑  Selecionar Todos", min_width=160)
-        btn_all.clicked.connect(self._toggle_all_files)
-        hdr.addWidget(btn_all)
+        self._btn_all_files = make_secondary_btn("☐  Selecionar Todos", min_width=150)
+        self._btn_all_files.clicked.connect(self._toggle_all_files)
+        hdr.addWidget(self._btn_all_files)
         hdr_w = QWidget()
         hdr_w.setLayout(hdr)
         hdr_w.setStyleSheet("background: transparent;")
         lay.addWidget(hdr_w)
-        lay.addWidget(spacer(h=4))
+        lay.addWidget(spacer(h=12))
+
+        # Search and Counter Row
+        search_lay = QHBoxLayout()
+        search_lay.setSpacing(12)
+        
+        self._search_input = QLineEdit()
+        self._search_input.setPlaceholderText("🔍  Buscar arquivo...")
+        self._search_input.setMinimumHeight(32)
+        self._search_input.setStyleSheet(f"""
+            QLineEdit {{
+                background: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 6px;
+                padding: 0 12px;
+                color: {COLORS['text']};
+            }}
+            QLineEdit:focus {{
+                border-color: {COLORS['accent']};
+            }}
+        """)
+        self._search_input.textChanged.connect(self._on_search)
+        
+        self._counter_lbl = QLabel("0 selecionados")
+        self._counter_lbl.setFont(QFont(FONT_MONO, 10, QFont.Weight.Bold))
+        self._counter_lbl.setStyleSheet(f"color: {COLORS['accent']}; background: transparent;")
+        
+        search_lay.addWidget(self._search_input, 1)
+        search_lay.addWidget(self._counter_lbl)
+        
+        search_w = QWidget()
+        search_w.setLayout(search_lay)
+        lay.addWidget(search_w)
+        lay.addWidget(spacer(h=8))
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -545,11 +372,11 @@ class PageTerminal(QWidget):
         lay.addWidget(self._dest_panel)
         lay.addWidget(spacer(h=16))
 
-        btn_copiar = _make_primary_btn("▶  COPIAR ARQUIVOS", 200)
+        btn_copiar = make_primary_btn("▶  COPIAR ARQUIVOS", 200)
         btn_copiar.clicked.connect(self._start_install)
-        btn_voltar = _make_secondary_btn("← VOLTAR", 120)
+        btn_voltar = make_secondary_btn("← VOLTAR", 120)
         btn_voltar.clicked.connect(lambda: self._go_step(2))
-        lay.addWidget(_btn_row(btn_copiar, btn_voltar))
+        lay.addWidget(btn_row(btn_copiar, btn_voltar))
 
         lay.addStretch()
         return w
@@ -588,13 +415,39 @@ class PageTerminal(QWidget):
 
         for idx, exe in enumerate(exes):
             item = MiniFileItem(exe["nome"], formatar_tamanho(exe["tamanho"]))
+            item.toggled.connect(self._update_counter)
             self._files_grid.addWidget(item, *divmod(idx, 2))
             self._file_items.append(item)
+            
+        self._update_counter()
+
+    def _on_search(self, text: str):
+        self._search_text = text.lower()
+        self._refiltrar_grid()
+
+    def _refiltrar_grid(self):
+        for i in range(self._files_grid.count()):
+            self._files_grid.itemAt(i).widget().hide()
+            
+        visiveis = [i for i in self._file_items if self._search_text in i.name.lower()]
+        for idx, item in enumerate(visiveis):
+            self._files_grid.addWidget(item, *divmod(idx, 2))
+            item.show()
+
+    def _update_counter(self):
+        sel = sum(1 for i in self._file_items if i.is_checked())
+        self._counter_lbl.setText(f"{sel} selecionado(s)")
+        todos = all(i.is_checked() for i in self._file_items) if self._file_items else False
+        self._btn_all_files.setText(
+            "☑  Desmarcar Todos" if todos else "☐  Selecionar Todos"
+        )
 
     def _toggle_all_files(self):
+        if not self._file_items: return
         todos = all(i.is_checked() for i in self._file_items)
         for item in self._file_items:
             item.set_checked(not todos)
+        self._update_counter()
 
     # ── STEP 5: Progresso ─────────────────────────────────────────────────────
 
@@ -666,7 +519,7 @@ class PageTerminal(QWidget):
             "campos":  rows,
         }
 
-        btn_menu = _make_primary_btn("← MENU PRINCIPAL", 200)
+        btn_menu = make_primary_btn("← MENU PRINCIPAL", 200)
         btn_menu.clicked.connect(self.go_menu.emit)
 
         btns = [btn_menu]

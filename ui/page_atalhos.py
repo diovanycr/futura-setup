@@ -15,9 +15,9 @@
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea,
-    QLabel, QGridLayout, QStackedWidget, QFileDialog, QSizePolicy, QLineEdit,
+    QLabel, QGridLayout, QStackedWidget, QFileDialog, QSizePolicy, QLineEdit, QFrame,
 )
-from PyQt6.QtCore import pyqtSignal, Qt
+from PyQt6.QtCore import pyqtSignal, Qt, QSize
 from PyQt6.QtGui import QFont
 import datetime
 import platform
@@ -25,73 +25,14 @@ import os
 from ui.widgets import (
     PageTitle, SectionHeader, AlertBox, ResultBox,
     LogConsole, ProgressBlock, StepIndicator,
-    MiniFileItem, DestPanel, make_btn, make_btn_row, spacer, label
+    MiniFileItem, DestPanel, make_primary_btn, make_secondary_btn,
+    btn_row, spacer, label
 )
 from ui.theme import COLORS, FONT_MONO
 from ui.theme_manager import theme_manager
 from core.network import Servidor
 from core.installer import listar_executaveis, AtalhosWorker
 
-# ── HELPERS DE BOTÃO (estilo inline garantido) ────────────────────────────────
-
-from PyQt6.QtWidgets import QPushButton
-
-def _make_primary_btn(text: str, min_width: int = 160) -> QPushButton:
-    btn = QPushButton(text)
-    btn.setMinimumWidth(min_width)
-    btn.setMinimumHeight(36)
-    btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    from PyQt6.QtGui import QFont as _QFont
-    btn.setFont(_QFont("Segoe UI", 13, _QFont.Weight.Bold))
-    _apply_primary(btn)
-    theme_manager.theme_changed.connect(lambda _: _apply_primary(btn))
-    return btn
-
-def _make_secondary_btn(text: str, min_width: int = 120) -> QPushButton:
-    btn = QPushButton(text)
-    btn.setMinimumWidth(min_width)
-    btn.setMinimumHeight(36)
-    btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    _apply_secondary(btn)
-    theme_manager.theme_changed.connect(lambda _: _apply_secondary(btn))
-    return btn
-
-def _apply_primary(btn: QPushButton):
-    text_color = "#ffffff" if theme_manager.mode == "light" else "#001826"
-    btn.setStyleSheet(f"""
-        QPushButton {{
-            background-color: {COLORS["accent"]};
-            color: {text_color};
-            border: none;
-            border-radius: 6px;
-            padding: 8px 20px;
-            font-weight: 700;
-            font-size: 13px;
-        }}
-        QPushButton:hover {{ background-color: {COLORS["accent_hover"]}; }}
-        QPushButton:pressed {{ background-color: {COLORS["accent_press"]}; }}
-        QPushButton:disabled {{
-            background-color: {COLORS["panel_hover"]};
-            color: {COLORS["text_disabled"]};
-        }}
-    """)
-
-def _apply_secondary(btn: QPushButton):
-    btn.setStyleSheet(f"""
-        QPushButton {{
-            background-color: transparent;
-            color: {COLORS["text"]};
-            border: 1.5px solid {COLORS["btn_border"]};
-            border-radius: 6px;
-            padding: 8px 20px;
-            font-size: 13px;
-        }}
-        QPushButton:hover {{
-            background-color: {COLORS["panel_hover"]};
-            border-color: {COLORS["text_dim"]};
-        }}
-        QPushButton:pressed {{ background-color: {COLORS["panel_press"]}; }}
-    """)
 
 
 STEP_NAMES = ["Aplicativos", "Destino", "Executando", "Concluído"]
@@ -145,7 +86,7 @@ class PageAtalhos(QWidget):
         hdr = QHBoxLayout()
         hdr.addWidget(SectionHeader("Aplicativos Disponíveis"))
         hdr.addStretch()
-        self._sel_all_btn = make_btn("☐  Selecionar Todos", min_width=130)
+        self._sel_all_btn = make_secondary_btn("☐  Selecionar Todos", min_width=150)
         self._sel_all_btn.clicked.connect(self._toggle_all)
         hdr.addWidget(self._sel_all_btn)
         hdr_w = QWidget()
@@ -205,23 +146,13 @@ class PageAtalhos(QWidget):
         lay.addWidget(scroll, 1)  # stretch=1 — ocupa todo espaço restante
 
         # Botões fixos no rodapé
-        btn_proximo = _make_primary_btn("▶  PRÓXIMO", 160)
+        btn_proximo = make_primary_btn("▶  PRÓXIMO", 160)
         btn_proximo.clicked.connect(self._confirm_apps)
-        btn_voltar = _make_secondary_btn("← VOLTAR", 120)
+        btn_voltar = make_secondary_btn("← VOLTAR", 120)
         btn_voltar.clicked.connect(self.go_menu.emit)
 
-        btns = QHBoxLayout()
-        btns.setSpacing(10)
-        btns.addStretch()
-        btns.addWidget(btn_proximo)
-        btns.addWidget(btn_voltar)
-        btns.addStretch()
-
-        btn_w = QWidget()
-        btn_w.setLayout(btns)
-        btn_w.setStyleSheet("background: transparent;")
         lay.addWidget(spacer(h=16))
-        lay.addWidget(btn_w)
+        lay.addWidget(btn_row(btn_proximo, btn_voltar))
         return w
 
     # ── STEP 2: Destino ───────────────────────────────────────────────────────
@@ -235,81 +166,56 @@ class PageAtalhos(QWidget):
 
         lay.addWidget(SectionHeader("Resumo da Seleção"))
 
-        self._resumo_box = QWidget()
-        self._resumo_box.setObjectName("ResumoBoxAt1")
-        self._resumo_labels: dict[str, QLabel] = {}
-        self._refresh_resumo_style()
-
-        resumo_lay = QVBoxLayout(self._resumo_box)
-        resumo_lay.setContentsMargins(20, 16, 20, 16)
-        resumo_lay.setSpacing(8)
-
-        for campo in ["Servidor", "Selecionados"]:
-            row_w = QWidget()
-            row_w.setStyleSheet("background: transparent;")
-            row = QHBoxLayout(row_w)
-            row.setContentsMargins(0, 0, 0, 0)
-            row.setSpacing(16)
-            k = QLabel(campo.upper())
-            k.setFont(QFont(FONT_MONO, 10))
-            k.setStyleSheet(f"color: {COLORS['text_dim']}; background: transparent;")
-            k.setFixedWidth(120)
-            v = QLabel("—")
-            v.setFont(QFont(FONT_MONO, 12))
-            v.setStyleSheet(f"color: {COLORS['text']}; background: transparent;")
-            v.setWordWrap(True)
-            self._resumo_labels[campo] = v
-            row.addWidget(k)
-            row.addWidget(v, 1)
-            resumo_lay.addWidget(row_w)
-
-        lay.addWidget(self._resumo_box)
-        lay.addWidget(spacer(h=4))
-
-        lay.addWidget(SectionHeader("Local de Criação"))
-        lay.addWidget(spacer(h=6))
-        self._dest_panel = DestPanel()
-        lay.addWidget(self._dest_panel)
-        lay.addWidget(spacer(h=12))
-
-        lay.addStretch()  # empurra botões para o rodapé
-
-        btn_criar = _make_primary_btn("▶  CRIAR ATALHOS", 180)
-        btn_criar.clicked.connect(self._run)
-        btn_voltar = _make_secondary_btn("← VOLTAR", 120)
-        btn_voltar.clicked.connect(lambda: self._go_step(0))
-
-        btns = QHBoxLayout()
-        btns.setSpacing(10)
-        btns.addStretch()
-        btns.addWidget(btn_criar)
-        btns.addWidget(btn_voltar)
-        btns.addStretch()
-
-        btn_w = QWidget()
-        btn_w.setLayout(btns)
-        btn_w.setStyleSheet("background: transparent;")
-        lay.addWidget(btn_w)
-
-        theme_manager.theme_changed.connect(self._refresh_resumo_style)
-        return w
-
-    def _refresh_resumo_style(self, _mode: str = ""):
-        self._resumo_box.setStyleSheet(f"""
-            QWidget#ResumoBoxAt1 {{
+        self._res_card = QFrame()
+        self._res_card.setObjectName("ResumoCardAt")
+        self._res_card.setStyleSheet(f"""
+            QFrame#ResumoCardAt {{
                 background: {COLORS['surface']};
                 border: 1px solid {COLORS['border']};
                 border-radius: 8px;
             }}
         """)
+        gl = QGridLayout(self._res_card)
+        gl.setContentsMargins(24, 20, 24, 20)
+        gl.setSpacing(16)
+
+        self._resumo_labels = {}
+        for i, campo in enumerate(["Servidor", "Selecionados"]):
+            k = QLabel(campo.upper())
+            k.setFont(QFont(FONT_MONO, 10, QFont.Weight.Bold))
+            k.setStyleSheet(f"color: {COLORS['text_dim']}; background: transparent;")
+            v = QLabel("—")
+            v.setFont(QFont(FONT_MONO, 11))
+            v.setStyleSheet(f"color: {COLORS['text']}; background: transparent;")
+            v.setWordWrap(True)
+            gl.addWidget(k, i, 0)
+            gl.addWidget(v, i, 1)
+            self._resumo_labels[campo] = v
+
+        lay.addWidget(self._res_card)
+        lay.addWidget(spacer(h=12))
+
+        lay.addWidget(SectionHeader("Local de Criação"))
+        lay.addWidget(spacer(h=6))
+        self._dest_panel = DestPanel()
+        lay.addWidget(self._dest_panel)
+        lay.addWidget(spacer(h=16))
+
+        btn_criar = make_primary_btn("▶  CRIAR ATALHOS", 180)
+        btn_criar.clicked.connect(self._run)
+        btn_voltar = make_secondary_btn("← VOLTAR", 120)
+        btn_voltar.clicked.connect(lambda: self._go_step(0))
+
+        lay.addWidget(btn_row(btn_criar, btn_voltar))
+        lay.addStretch()
+        return w
 
     def _update_resumo(self):
         selecionados = sum(1 for i in self._file_items if i.is_checked())
         self._resumo_labels["Servidor"].setText(
-            self._servidor.display if self._servidor else "—"
+            self._servidor.nome if self._servidor else "—"
         )
         self._resumo_labels["Selecionados"].setText(f"{selecionados} aplicativo(s)")
-        self._refresh_resumo_style()
 
     # ── STEP 3: Executando ────────────────────────────────────────────────────
 
@@ -369,7 +275,7 @@ class PageAtalhos(QWidget):
         }
 
         # ── Botões com estilo correto (padrão das outras telas) ──
-        btn_menu = _make_primary_btn("← MENU PRINCIPAL", 200)
+        btn_menu = make_primary_btn("← MENU PRINCIPAL", 200)
         btn_menu.clicked.connect(self.go_menu.emit)
 
         btns = QHBoxLayout()
@@ -377,22 +283,18 @@ class PageAtalhos(QWidget):
         btns.addWidget(btn_menu)
 
         if sucesso:
-            btn_relatorio = _make_secondary_btn("💾  Salvar Relatório", 180)
+            btn_relatorio = make_secondary_btn("💾  Salvar Relatório", 180)
             btn_relatorio.clicked.connect(
                 lambda: self._exportar_relatorio(self._ultimo_relatorio)
             )
             btns.addWidget(btn_relatorio)
 
         if not sucesso:
-            btn_retry = _make_primary_btn("↺  TENTAR NOVAMENTE", 200)
+            btn_retry = make_primary_btn("↺  TENTAR NOVAMENTE", 200)
             btn_retry.clicked.connect(lambda: self._go_step(0))
             btns.addWidget(btn_retry)
 
-        btns.addStretch()
-
-        btn_w = QWidget()
-        btn_w.setLayout(btns)
-        btn_w.setStyleSheet("background: transparent;")
+        lay.addWidget(btn_row(btn_menu, *([btn_relatorio] if sucesso else []), *([btn_retry] if not sucesso else [])))
 
         self._done_lay.addWidget(ResultBox(titulo, rows, kind))
         self._done_lay.addWidget(spacer(h=8))
@@ -504,6 +406,7 @@ class PageAtalhos(QWidget):
         # Se já estavam todos marcados, vamos desmarcar. Senão, marca tudo.
         for item in self._file_items:
             item.set_checked(not todos)
+        self._update_counter()
 
     def _confirm_apps(self):
         if not any(i.is_checked() for i in self._file_items):

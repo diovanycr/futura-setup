@@ -27,8 +27,8 @@ from ui.theme import COLORS, FONT_SANS, FONT_MONO
 from ui.theme_manager import theme_manager
 from ui.widgets import (
     PageTitle, SectionHeader, AlertBox, LogConsole,
-    ProgressBlock, ResultBox, make_btn, make_btn_row,
-    spacer, h_line, label, ConfirmDialog,
+    ProgressBlock, ResultBox, make_primary_btn, make_secondary_btn,
+    btn_row, spacer, h_line, label, ConfirmDialog,
 )
 from core.logger import log
 from core.port_opener import (
@@ -348,7 +348,7 @@ class _StepConfig(QWidget):
         self._port_input.setFont(QFont(FONT_MONO, 12))   # ← menor
         self._port_input.returnPressed.connect(self._add_from_input)
 
-        self._btn_add = make_btn("＋ Adicionar", "primary", min_width=120)
+        self._btn_add = make_primary_btn("＋ ADICIONAR", 120)
         self._btn_add.clicked.connect(self._add_from_input)
 
         input_row.addWidget(self._port_input, 1)
@@ -429,8 +429,8 @@ class _StepConfig(QWidget):
         f_lay.setSpacing(6)
         f_lay.addWidget(h_line())
 
-        self._btn_abrir   = make_btn("▶  Abrir Portas no Firewall", "primary",   min_width=220)
-        self._btn_remover = make_btn("✕  Remover Regras",           "secondary", min_width=160)
+        self._btn_abrir   = make_primary_btn("▶  ABRIR PORTAS NO FIREWALL", 220)
+        self._btn_remover = make_secondary_btn("✕  REMOVER REGRAS",           160)
         self._btn_abrir.clicked.connect(self._on_abrir)
         self._btn_remover.clicked.connect(self._on_remover)
 
@@ -588,7 +588,7 @@ class _StepConfig(QWidget):
             texto     = f"{', '.join(str(p) for p in ports)}  {proto} {dir_s}"
             tooltip   = f"{ts}  ·  {proto}  ·  {direction}"
 
-            btn = make_btn(texto, "secondary", min_width=0)
+            btn = make_secondary_btn(texto, 0)
             btn.setToolTip(tooltip)
             btn.setFixedHeight(26)   # ← compactado
             btn.setStyleSheet(
@@ -659,7 +659,7 @@ class _StepExecucao(QWidget):
         footer = QWidget()
         f_lay  = QHBoxLayout(footer)
         f_lay.setContentsMargins(0, 8, 0, 0)
-        self._btn_cancel = make_btn("✕  Cancelar", "secondary", min_width=140)
+        self._btn_cancel = make_secondary_btn("✕  CANCELAR", 140)
         self._btn_cancel.clicked.connect(self._cancelar)
         f_lay.addStretch()
         f_lay.addWidget(self._btn_cancel)
@@ -710,10 +710,11 @@ class _StepResultado(QWidget):
         lay.addStretch()
 
         lay.addWidget(h_line())
-        lay.addWidget(make_btn_row(
-            [("Nova operação", "secondary", self.go_config.emit)],
-            back=self.go_menu.emit,
-        ))
+        btn_novo = make_secondary_btn("NOVA OPERAÇÃO", 160)
+        btn_novo.clicked.connect(self.go_config.emit)
+        btn_voltar = make_secondary_btn("VOLTAR", 120)
+        btn_voltar.clicked.connect(self.go_menu.emit)
+        lay.addWidget(btn_row(btn_novo, btn_voltar))
 
         theme_manager.theme_changed.connect(self._upd)
         self._upd()

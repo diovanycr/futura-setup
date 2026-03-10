@@ -16,66 +16,15 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import pyqtSignal, Qt, QTimer
 from PyQt6.QtGui import QFont
 
-from ui.widgets import PageTitle, SectionHeader, AlertBox, LogConsole, make_btn, spacer
+from ui.widgets import (
+    PageTitle, SectionHeader, AlertBox, LogConsole,
+    make_primary_btn, make_secondary_btn, btn_row, spacer
+)
 from ui.theme import COLORS, FONT_SANS
 from ui.theme_manager import theme_manager
 from core.logger import log
 
 
-# -- HELPERS DE BOTÃO ---------------------------------------------------------
-
-def _make_primary_btn(text: str, min_width: int = 140) -> QPushButton:
-    btn = QPushButton(text)
-    btn.setMinimumWidth(min_width)
-    btn.setMinimumHeight(36)
-    btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    btn.setFont(QFont(FONT_SANS, 13, QFont.Weight.Bold))
-    _apply_primary(btn)
-    theme_manager.theme_changed.connect(lambda _: _apply_primary(btn))
-    return btn
-
-def _make_secondary_btn(text: str, min_width: int = 120) -> QPushButton:
-    btn = QPushButton(text)
-    btn.setMinimumWidth(min_width)
-    btn.setMinimumHeight(36)
-    btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    btn.setFont(QFont(FONT_SANS, 12))
-    _apply_secondary(btn)
-    theme_manager.theme_changed.connect(lambda _: _apply_secondary(btn))
-    return btn
-
-def _apply_primary(btn: QPushButton):
-    text_color = "#ffffff" if theme_manager.mode == "light" else "#001826"
-    btn.setStyleSheet(f"""
-        QPushButton {{
-            background-color: {COLORS["accent"]};
-            color: {text_color};
-            border: none;
-            border-radius: 6px;
-            padding: 8px 20px;
-            font-weight: 700;
-            font-size: 13px;
-        }}
-        QPushButton:hover {{ background-color: {COLORS["accent_hover"]}; }}
-        QPushButton:pressed {{ background-color: {COLORS["accent_press"]}; }}
-    """)
-
-def _apply_secondary(btn: QPushButton):
-    btn.setStyleSheet(f"""
-        QPushButton {{
-            background-color: transparent;
-            color: {COLORS["text"]};
-            border: 1.5px solid {COLORS["btn_border"]};
-            border-radius: 6px;
-            padding: 8px 16px;
-            font-size: 12px;
-        }}
-        QPushButton:hover {{
-            background-color: {COLORS["panel_hover"]};
-            border-color: {COLORS["text_dim"]};
-        }}
-        QPushButton:pressed {{ background-color: {COLORS["panel_press"]}; }}
-    """)
 
 
 class PageLog(QWidget):
@@ -182,31 +131,19 @@ class PageLog(QWidget):
         footer_lay.setContentsMargins(40, 10, 40, 20)
         footer_lay.setSpacing(0)
 
-        btns = QHBoxLayout()
-        btns.setSpacing(8)
-
-        btn_refresh = _make_primary_btn("↺  ATUALIZAR", 140)
+        btn_refresh = make_primary_btn("↺  ATUALIZAR", 140)
         btn_refresh.clicked.connect(self.load_log)
 
-        btn_export = _make_secondary_btn("↓  EXPORTAR", 130)
+        btn_export = make_secondary_btn("↓  EXPORTAR", 130)
         btn_export.clicked.connect(self._export_log)
 
-        btn_open = _make_secondary_btn("ABRIR EXTERNAMENTE", 190)
+        btn_open = make_secondary_btn("ABRIR EXTERNAMENTE", 190)
         btn_open.clicked.connect(self._open_external)
 
-        btn_voltar = _make_secondary_btn("← VOLTAR", 110)
+        btn_voltar = make_secondary_btn("← VOLTAR", 110)
         btn_voltar.clicked.connect(self.go_menu.emit)
 
-        btns.addWidget(btn_refresh)
-        btns.addWidget(btn_export)
-        btns.addWidget(btn_open)
-        btns.addWidget(btn_voltar)
-        btns.addStretch()
-
-        btn_w = QWidget()
-        btn_w.setLayout(btns)
-        btn_w.setStyleSheet("background: transparent;")
-        footer_lay.addWidget(btn_w)
+        footer_lay.addWidget(btn_row(btn_refresh, btn_export, btn_open, btn_voltar))
 
         root.addWidget(footer, 0)         # footer fixo, não expande
 

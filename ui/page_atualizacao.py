@@ -19,7 +19,7 @@ from PyQt6.QtGui import QFont
 from ui.widgets import (
     PageTitle, SectionHeader, AlertBox, ResultBox,
     ProgressBlock, LogConsole, StepIndicator, RadioRow,
-    make_btn, make_btn_row, spacer, label, ConfirmDialog,
+    make_primary_btn, make_secondary_btn, btn_row, spacer, label, ConfirmDialog,
 )
 from ui.theme import COLORS, FONT_MONO, FONT_SANS
 from ui.theme_manager import theme_manager
@@ -31,74 +31,6 @@ from core.atualizador import (
 STEP_NAMES = ["Instalação", "Banco", "Resumo", "Executando", "Concluído"]
 
 
-# ── HELPERS DE BOTÃO (mesmo padrão do page_terminal) ─────────────────────────
-
-def _make_primary_btn(text: str, min_width: int = 180) -> QPushButton:
-    btn = QPushButton(text)
-    btn.setMinimumWidth(min_width)
-    btn.setMinimumHeight(36)
-    btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    btn.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
-    _apply_primary(btn)
-    theme_manager.theme_changed.connect(lambda _: _apply_primary(btn))
-    return btn
-
-def _make_secondary_btn(text: str, min_width: int = 120) -> QPushButton:
-    btn = QPushButton(text)
-    btn.setMinimumWidth(min_width)
-    btn.setMinimumHeight(36)
-    btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    _apply_secondary(btn)
-    theme_manager.theme_changed.connect(lambda _: _apply_secondary(btn))
-    return btn
-
-def _apply_primary(btn: QPushButton):
-    text_color = "#ffffff" if theme_manager.mode == "light" else "#001826"
-    btn.setStyleSheet(f"""
-        QPushButton {{
-            background-color: {COLORS["accent"]};
-            color: {text_color};
-            border: none;
-            border-radius: 6px;
-            padding: 8px 20px;
-            font-weight: 700;
-            font-size: 13px;
-        }}
-        QPushButton:hover {{ background-color: {COLORS["accent_hover"]}; }}
-        QPushButton:pressed {{ background-color: {COLORS["accent_press"]}; }}
-        QPushButton:disabled {{
-            background-color: {COLORS["panel_hover"]};
-            color: {COLORS["text_disabled"]};
-        }}
-    """)
-
-def _apply_secondary(btn: QPushButton):
-    btn.setStyleSheet(f"""
-        QPushButton {{
-            background-color: transparent;
-            color: {COLORS["text"]};
-            border: 1.5px solid {COLORS["btn_border"]};
-            border-radius: 6px;
-            padding: 8px 20px;
-            font-size: 13px;
-        }}
-        QPushButton:hover {{
-            background-color: {COLORS["panel_hover"]};
-            border-color: {COLORS["text_dim"]};
-        }}
-        QPushButton:pressed {{ background-color: {COLORS["panel_press"]}; }}
-    """)
-
-def _btn_row(*btns) -> QWidget:
-    row = QHBoxLayout()
-    row.setSpacing(10)
-    for btn in btns:
-        row.addWidget(btn)
-    row.addStretch()
-    w = QWidget()
-    w.setLayout(row)
-    w.setStyleSheet("background: transparent;")
-    return w
 
 
 # ── CARD DE PASTA ─────────────────────────────────────────────────────────────
@@ -333,13 +265,13 @@ class PageAtualizacao(QWidget):
 
         lay.addWidget(spacer(h=8))
 
-        btn_detectar = _make_primary_btn("▶  DETECTAR INSTALAÇÕES", 200)
+        btn_detectar = make_primary_btn("▶  DETECTAR INSTALAÇÕES", 200)
         btn_detectar.clicked.connect(self._detectar_pastas)
-        btn_proximo = _make_primary_btn("▶  PRÓXIMO", 160)
+        btn_proximo = make_primary_btn("▶  PRÓXIMO", 160)
         btn_proximo.clicked.connect(self._confirm_pasta)
-        btn_voltar = _make_secondary_btn("← VOLTAR", 120)
+        btn_voltar = make_secondary_btn("← VOLTAR", 120)
         btn_voltar.clicked.connect(self.go_menu.emit)
-        lay.addWidget(_btn_row(btn_detectar, btn_proximo, btn_voltar))
+        lay.addWidget(btn_row(btn_detectar, btn_proximo, btn_voltar))
 
         lay.addStretch()
         return w
@@ -428,11 +360,11 @@ class PageAtualizacao(QWidget):
 
         lay.addWidget(spacer(h=8))
 
-        btn_proximo = _make_primary_btn("▶  PRÓXIMO", 160)
+        btn_proximo = make_primary_btn("▶  PRÓXIMO", 160)
         btn_proximo.clicked.connect(self._confirm_banco)
-        btn_voltar = _make_secondary_btn("← VOLTAR", 120)
+        btn_voltar = make_secondary_btn("← VOLTAR", 120)
         btn_voltar.clicked.connect(lambda: self._go_step(0))
-        lay.addWidget(_btn_row(btn_proximo, btn_voltar))
+        lay.addWidget(btn_row(btn_proximo, btn_voltar))
 
         lay.addStretch()
         return w
@@ -557,11 +489,11 @@ class PageAtualizacao(QWidget):
         lay.addWidget(self._resumo_box)
         lay.addWidget(spacer(h=8))
 
-        btn_confirmar = _make_primary_btn("✓  CONFIRMAR E ATUALIZAR", 220)
+        btn_confirmar = make_primary_btn("✓  CONFIRMAR E ATUALIZAR", 220)
         btn_confirmar.clicked.connect(self._confirmar_atualizacao)
-        btn_voltar = _make_secondary_btn("← VOLTAR", 120)
+        btn_voltar = make_secondary_btn("← VOLTAR", 120)
         btn_voltar.clicked.connect(lambda: self._go_step(1))
-        lay.addWidget(_btn_row(btn_confirmar, btn_voltar))
+        lay.addWidget(btn_row(btn_confirmar, btn_voltar))
 
         lay.addStretch()
         theme_manager.theme_changed.connect(self._refresh_resumo_style)
@@ -641,14 +573,14 @@ class PageAtualizacao(QWidget):
         self._done_lay.addWidget(ResultBox(titulo, rows, kind))
         self._done_lay.addWidget(spacer(h=8))
 
-        btn_menu = _make_primary_btn("← MENU PRINCIPAL", 200)
+        btn_menu = make_primary_btn("← MENU PRINCIPAL", 200)
         btn_menu.clicked.connect(self.go_menu.emit)
         btns = [btn_menu]
         if not sucesso:
-            btn_retry = _make_primary_btn("↺  TENTAR NOVAMENTE", 200)
+            btn_retry = make_primary_btn("↺  TENTAR NOVAMENTE", 200)
             btn_retry.clicked.connect(self.reset)
             btns.append(btn_retry)
-        self._done_lay.addWidget(_btn_row(*btns))
+        self._done_lay.addWidget(btn_row(*btns))
         self._done_lay.addStretch()
 
     # -- ATUALIZAÇÃO -----------------------------------------------------------

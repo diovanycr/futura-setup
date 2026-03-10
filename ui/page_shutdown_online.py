@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (
 
 from ui.theme import COLORS, FONT_SANS, FONT_MONO
 from ui.theme_manager import theme_manager
-from ui.widgets import PageTitle, SectionHeader, AlertBox, h_line
+from ui.widgets import PageTitle, SectionHeader, AlertBox, make_primary_btn, make_secondary_btn, btn_row, spacer, label, h_line
 from core.logger import log
 
 
@@ -85,81 +85,15 @@ def _verificar_status_banco(gstat: str, banco: str) -> str:
 # Helpers de botao
 # ---------------------------------------------------------------------------
 
-def _make_primary_btn(text: str, min_width: int = 160) -> QPushButton:
+def make_danger_btn(text: str, min_width: int = 120) -> QPushButton:
     btn = QPushButton(text)
     btn.setMinimumWidth(min_width)
-    btn.setMinimumHeight(28)
+    btn.setMinimumHeight(35)
     btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    btn.setFont(QFont(FONT_SANS, 11, QFont.Weight.Bold))
-    _apply_primary(btn)
-    theme_manager.theme_changed.connect(lambda _: _apply_primary(btn))
-    return btn
-
-
-def _make_secondary_btn(text: str, min_width: int = 96) -> QPushButton:
-    btn = QPushButton(text)
-    btn.setMinimumWidth(min_width)
-    btn.setMinimumHeight(28)
-    btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    btn.setFont(QFont(FONT_SANS, 10))
-    _apply_secondary(btn)
-    theme_manager.theme_changed.connect(lambda _: _apply_secondary(btn))
-    return btn
-
-
-def _make_danger_btn(text: str, min_width: int = 120) -> QPushButton:
-    btn = QPushButton(text)
-    btn.setMinimumWidth(min_width)
-    btn.setMinimumHeight(28)
-    btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    btn.setFont(QFont(FONT_SANS, 11, QFont.Weight.Bold))
+    btn.setFont(QFont(FONT_SANS, 12, QFont.Weight.Bold))
     _apply_danger(btn)
     theme_manager.theme_changed.connect(lambda _: _apply_danger(btn))
     return btn
-
-
-def _apply_primary(btn: QPushButton):
-    text_color = "#ffffff" if theme_manager.mode == "light" else "#001826"
-    btn.setStyleSheet(f"""
-        QPushButton {{
-            background-color: {COLORS['accent']};
-            color: {text_color};
-            border: none;
-            border-radius: 5px;
-            padding: 5px 14px;
-            font-weight: 700;
-            font-size: 11px;
-        }}
-        QPushButton:hover   {{ background-color: {COLORS['accent_hover']}; }}
-        QPushButton:pressed {{ background-color: {COLORS['accent_press']}; }}
-        QPushButton:disabled {{
-            background-color: {COLORS['panel_hover']};
-            color: {COLORS['text_disabled']};
-        }}
-    """)
-
-
-def _apply_secondary(btn: QPushButton):
-    btn.setStyleSheet(f"""
-        QPushButton {{
-            background-color: transparent;
-            color: {COLORS['text']};
-            border: 1.5px solid {COLORS['btn_border']};
-            border-radius: 5px;
-            padding: 5px 12px;
-            font-size: 10px;
-        }}
-        QPushButton:hover {{
-            background-color: {COLORS['panel_hover']};
-            border-color: {COLORS['text_dim']};
-        }}
-        QPushButton:pressed {{ background-color: {COLORS['panel_press']}; }}
-        QPushButton:disabled {{
-            color: {COLORS['text_disabled']};
-            border-color: {COLORS['text_disabled']};
-        }}
-    """)
-
 
 def _apply_danger(btn: QPushButton):
     btn.setStyleSheet(f"""
@@ -167,11 +101,13 @@ def _apply_danger(btn: QPushButton):
             background-color: {COLORS['danger']};
             color: #ffffff;
             border: none;
-            border-radius: 5px;
-            padding: 5px 14px;
+            border-radius: 6px;
+            padding: 8px 20px;
             font-weight: 700;
-            font-size: 11px;
+            font-size: 13px;
         }}
+        QPushButton:hover {{ background-color: {COLORS['danger']}; opacity: 0.9; }}
+        QPushButton:pressed {{ background-color: {COLORS['danger']}; opacity: 0.8; }}
         QPushButton:disabled {{
             background-color: {COLORS['panel_hover']};
             color: {COLORS['text_disabled']};
@@ -418,17 +354,14 @@ class _StepFormulario(QWidget):
 
         lay.addWidget(SectionHeader("Status do Banco"))
         status_row = QHBoxLayout()
-        self._btn_status = _make_secondary_btn("🔍  Verificar Status", 148)
+        self._btn_status = make_secondary_btn("🔍  VERIFICAR STATUS", 148)
         self._btn_status.clicked.connect(self._on_verificar_status)
         self._btn_status.setEnabled(bool(self._gstat_path))
-        self._status_badge = QLabel("—")
+        self._status_badge = label("—", COLORS["text_dim"], 10)
         self._status_badge.setFont(QFont(FONT_MONO, 10, QFont.Weight.Bold))
         self._status_badge.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
         self._atualizar_badge("—")
-        status_row.addWidget(self._btn_status)
-        status_row.addWidget(self._status_badge)
-        status_row.addStretch()
-        lay.addLayout(status_row)
+        lay.addWidget(btn_row(self._btn_status, self._status_badge))
 
         lay.addWidget(SectionHeader("Comandos"))
         for titulo, desc, cor in [
@@ -474,19 +407,14 @@ class _StepFormulario(QWidget):
         foot_lay.setContentsMargins(0, 5, 0, 0)
         foot_lay.setSpacing(4)
 
-        self._btn_shutdown = _make_danger_btn("⏻  Shutdown", 120)
-        self._btn_online   = _make_primary_btn("▶  Online",  104)
+        self._btn_shutdown = make_danger_btn("⏻  SHUTDOWN", 120)
+        self._btn_online   = make_primary_btn("▶  ONLINE",  120)
         self._btn_shutdown.clicked.connect(lambda: self._on_executar("shutdown"))
         self._btn_online.clicked.connect(lambda: self._on_executar("online"))
         self._set_enabled(bool(self._gfix_path))
 
-        btn_row = QHBoxLayout()
-        btn_row.addWidget(self._btn_shutdown)
-        btn_row.addWidget(self._btn_online)
-        btn_row.addStretch()
-
         foot_lay.addWidget(h_line())
-        foot_lay.addLayout(btn_row)
+        foot_lay.addWidget(btn_row(self._btn_shutdown, self._btn_online))
         root.addWidget(footer, 0)
 
     def _atualizar_badge(self, status: str):
@@ -594,16 +522,11 @@ class _StepResultado(QWidget):
 
         self._root_lay.addWidget(h_line())
 
-        self._btn_nova = _make_primary_btn("Nova Operação", 128)
-        self._btn_menu = _make_secondary_btn("Menu Principal", 128)
+        self._btn_nova = make_primary_btn("NOVA OPERAÇÃO", 160)
+        self._btn_menu = make_secondary_btn("MENU PRINCIPAL", 160)
         self._btn_nova.clicked.connect(self.nova_op.emit)
         self._btn_menu.clicked.connect(self.go_menu.emit)
-
-        btn_row = QHBoxLayout()
-        btn_row.addWidget(self._btn_nova)
-        btn_row.addWidget(self._btn_menu)
-        btn_row.addStretch()
-        self._root_lay.addLayout(btn_row)
+        self._root_lay.addWidget(btn_row(self._btn_nova, self._btn_menu))
 
     def set_resultado(self, sucesso: bool, modo: str, cmd: str, saida: str):
         while self._scroll_lay.count():

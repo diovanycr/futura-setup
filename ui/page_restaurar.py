@@ -18,7 +18,8 @@ from PyQt6.QtGui import QFont
 
 from ui.widgets import (
     PageTitle, SectionHeader, AlertBox, ResultBox,
-    ProgressBlock, LogConsole, make_btn, spacer, label
+    ProgressBlock, LogConsole, make_primary_btn, make_secondary_btn,
+    btn_row, spacer, label
 )
 from ui.theme import COLORS, FONT_MONO, FONT_SANS
 from ui.theme_manager import theme_manager
@@ -30,75 +31,6 @@ from core.logger import log
 from config import PASTAS_INSTALACAO_PADRAO
 
 
-# ── HELPERS DE BOTÃO (mesmo padrão do PageDiagnostico) ───────────────────────
-
-def _make_primary_btn(text: str, min_width: int = 180) -> QPushButton:
-    btn = QPushButton(text)
-    btn.setMinimumWidth(min_width)
-    btn.setMinimumHeight(36)
-    btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    btn.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
-    _apply_primary(btn)
-    theme_manager.theme_changed.connect(lambda _: _apply_primary(btn))
-    return btn
-
-def _make_secondary_btn(text: str, min_width: int = 120) -> QPushButton:
-    btn = QPushButton(text)
-    btn.setMinimumWidth(min_width)
-    btn.setMinimumHeight(36)
-    btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    _apply_secondary(btn)
-    theme_manager.theme_changed.connect(lambda _: _apply_secondary(btn))
-    return btn
-
-def _apply_primary(btn: QPushButton):
-    text_color = "#ffffff" if theme_manager.mode == "light" else "#001826"
-    btn.setStyleSheet(f"""
-        QPushButton {{
-            background-color: {COLORS["accent"]};
-            color: {text_color};
-            border: none;
-            border-radius: 6px;
-            padding: 8px 20px;
-            font-weight: 700;
-            font-size: 13px;
-        }}
-        QPushButton:hover {{ background-color: {COLORS["accent_hover"]}; }}
-        QPushButton:pressed {{ background-color: {COLORS["accent_press"]}; }}
-        QPushButton:disabled {{
-            background-color: {COLORS["accent"]};
-            color: {text_color};
-            opacity: 0.4;
-        }}
-    """)
-
-def _apply_secondary(btn: QPushButton):
-    btn.setStyleSheet(f"""
-        QPushButton {{
-            background-color: transparent;
-            color: {COLORS["text"]};
-            border: 1.5px solid {COLORS["btn_border"]};
-            border-radius: 6px;
-            padding: 8px 20px;
-            font-size: 13px;
-        }}
-        QPushButton:hover {{
-            background-color: {COLORS["panel_hover"]};
-            border-color: {COLORS["text_dim"]};
-        }}
-        QPushButton:pressed {{ background-color: {COLORS["panel_press"]}; }}
-    """)
-
-def _btn_row(*btns) -> QWidget:
-    row = QHBoxLayout()
-    row.setSpacing(10)
-    for btn in btns:
-        row.addWidget(btn)
-    row.addStretch()
-    w = QWidget()
-    w.setLayout(row)
-    w.setStyleSheet("background: transparent;")
-    return w
 
 
 # ── COMBO COM SETA VISÍVEL ────────────────────────────────────────────────────
@@ -387,13 +319,13 @@ class PageRestaurar(QWidget):
         footer_lay.setContentsMargins(0, 8, 0, 0)
         footer_lay.setSpacing(0)
 
-        self._btn_restaurar = _make_primary_btn("↺  RESTAURAR SELECIONADO", 240)
+        self._btn_restaurar = make_primary_btn("↺  RESTAURAR SELECIONADO", 240)
         self._btn_restaurar.clicked.connect(self._confirm)
         self._btn_restaurar.setEnabled(False)
-        btn_voltar = _make_secondary_btn("← VOLTAR", 120)
+        btn_voltar = make_secondary_btn("← VOLTAR", 120)
         btn_voltar.clicked.connect(self.go_menu.emit)
 
-        footer_lay.addWidget(_btn_row(self._btn_restaurar, btn_voltar))
+        footer_lay.addWidget(btn_row(self._btn_restaurar, btn_voltar))
         root_lay.addWidget(footer, 0)
         return root
 
@@ -452,12 +384,12 @@ class PageRestaurar(QWidget):
         lay.addWidget(self._confirm_box_w)
         lay.addWidget(spacer(h=8))
 
-        btn_ok   = _make_primary_btn("✓  CONFIRMAR RESTAURAÇÃO", 250)
+        btn_ok   = make_primary_btn("✓  CONFIRMAR RESTAURAÇÃO", 250)
         btn_ok.clicked.connect(self._run_restore)
-        btn_back = _make_secondary_btn("← VOLTAR", 120)
+        btn_back = make_secondary_btn("← VOLTAR", 120)
         btn_back.clicked.connect(lambda: self._stack.setCurrentIndex(0))
 
-        lay.addWidget(_btn_row(btn_ok, btn_back))
+        lay.addWidget(btn_row(btn_ok, btn_back))
         lay.addStretch()
         return w
 
@@ -651,11 +583,11 @@ class PageRestaurar(QWidget):
             ("Erros",    str(resumo.get("erros", 0))),
         ]
         box = ResultBox(titulo, rows, kind)
-        btn = _make_primary_btn("← MENU PRINCIPAL", 200)
+        btn = make_primary_btn("← MENU PRINCIPAL", 200)
         btn.clicked.connect(self.go_menu.emit)
 
         self._done_lay.addWidget(box)
         self._done_lay.addWidget(spacer(h=8))
-        self._done_lay.addWidget(_btn_row(btn))
+        self._done_lay.addWidget(btn_row(btn))
         self._done_lay.addStretch()
         self._stack.setCurrentIndex(3)

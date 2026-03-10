@@ -18,80 +18,12 @@ from PyQt6.QtGui import QFont
 from ui.theme import COLORS, FONT_SANS, FONT_MONO
 from ui.theme_manager import theme_manager
 from ui.widgets import (
-    PageTitle, SectionHeader, AlertBox, make_btn, make_btn_row,
-    spacer, h_line, label,
+    PageTitle, SectionHeader, AlertBox, make_primary_btn, make_secondary_btn,
+    btn_row, spacer, h_line, label,
 )
 from core.diagnostico import DiagnosticoWorker, DiagItem
 
 
-# ── HELPERS DE BOTÃO ─────────────────────────────────────────────────────────
-
-def _make_primary_btn(text: str, min_width: int = 180) -> QPushButton:
-    btn = QPushButton(text)
-    btn.setMinimumWidth(min_width)
-    btn.setMinimumHeight(36)
-    btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    btn.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
-    _apply_primary(btn)
-    theme_manager.theme_changed.connect(lambda _: _apply_primary(btn))
-    return btn
-
-def _make_secondary_btn(text: str, min_width: int = 120) -> QPushButton:
-    btn = QPushButton(text)
-    btn.setMinimumWidth(min_width)
-    btn.setMinimumHeight(36)
-    btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    _apply_secondary(btn)
-    theme_manager.theme_changed.connect(lambda _: _apply_secondary(btn))
-    return btn
-
-def _apply_primary(btn: QPushButton):
-    text_color = "#ffffff" if theme_manager.mode == "light" else "#001826"
-    btn.setStyleSheet(f"""
-        QPushButton {{
-            background-color: {COLORS["accent"]};
-            color: {text_color};
-            border: none;
-            border-radius: 6px;
-            padding: 8px 20px;
-            font-weight: 700;
-            font-size: 13px;
-        }}
-        QPushButton:hover {{ background-color: {COLORS["accent_hover"]}; }}
-        QPushButton:pressed {{ background-color: {COLORS["accent_press"]}; }}
-        QPushButton:disabled {{
-            background-color: {COLORS["panel_hover"]};
-            color: {COLORS["text_disabled"]};
-        }}
-    """)
-
-def _apply_secondary(btn: QPushButton):
-    btn.setStyleSheet(f"""
-        QPushButton {{
-            background-color: transparent;
-            color: {COLORS["text"]};
-            border: 1.5px solid {COLORS["btn_border"]};
-            border-radius: 6px;
-            padding: 8px 20px;
-            font-size: 13px;
-        }}
-        QPushButton:hover {{
-            background-color: {COLORS["panel_hover"]};
-            border-color: {COLORS["text_dim"]};
-        }}
-        QPushButton:pressed {{ background-color: {COLORS["panel_press"]}; }}
-    """)
-
-def _btn_row(*btns) -> QWidget:
-    row = QHBoxLayout()
-    row.setSpacing(10)
-    for btn in btns:
-        row.addWidget(btn)
-    row.addStretch()
-    w = QWidget()
-    w.setLayout(row)
-    w.setStyleSheet("background: transparent;")
-    return w
 
 
 # ── CARD DE RESULTADO DE TESTE ─────────────────────────────────────────────────
@@ -244,11 +176,11 @@ class PageDiagnostico(QWidget):
         lay.addWidget(h_line())
         lay.addWidget(spacer(h=8))
 
-        btn_iniciar = _make_primary_btn("🔍  Iniciar Diagnóstico", 200)
+        btn_iniciar = make_primary_btn("🔍  INICIAR DIAGNÓSTICO", 200)
         btn_iniciar.clicked.connect(self._iniciar)
-        btn_voltar = _make_secondary_btn("← VOLTAR", 120)
+        btn_voltar = make_secondary_btn("← VOLTAR", 120)
         btn_voltar.clicked.connect(self.go_menu.emit)
-        lay.addWidget(_btn_row(btn_iniciar, btn_voltar))
+        lay.addWidget(btn_row(btn_iniciar, btn_voltar))
 
         lay.addStretch()
 
@@ -311,11 +243,11 @@ class PageDiagnostico(QWidget):
         lay.addWidget(h_line())
         lay.addWidget(spacer(h=8))
 
-        btn_novo = _make_secondary_btn("🔄  Novo Diagnóstico", 180)
+        btn_novo = make_secondary_btn("🔄  NOVO DIAGNÓSTICO", 180)
         btn_novo.clicked.connect(self._go_novo)
-        btn_voltar = _make_secondary_btn("← VOLTAR", 120)
+        btn_voltar = make_secondary_btn("← VOLTAR", 120)
         btn_voltar.clicked.connect(self.go_menu.emit)
-        lay.addWidget(_btn_row(btn_novo, btn_voltar))
+        lay.addWidget(btn_row(btn_novo, btn_voltar))
 
         lay.addStretch()
         return w

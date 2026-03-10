@@ -25,8 +25,8 @@ from ui.theme import COLORS, FONT_SANS, FONT_MONO
 from ui.theme_manager import theme_manager
 from ui.widgets import (
     PageTitle, SectionHeader, AlertBox, LogConsole,
-    ProgressBlock, ResultBox, make_btn, make_btn_row, spacer, h_line, label,
-    ConfirmDialog,
+    ProgressBlock, ResultBox, make_primary_btn, make_secondary_btn,
+    btn_row, spacer, h_line, label, ConfirmDialog,
 )
 from core.logger import log
 from core.backup_gbak import (
@@ -43,69 +43,6 @@ _DEFAULT_PASTA_DADOS  = r"C:\Futura\Dados"
 _DEFAULT_PASTA_BACKUP = r"C:\Futura\Backup"
 
 
-# ---------------------------------------------------------------------------
-# Helpers de botao
-# ---------------------------------------------------------------------------
-
-def _make_primary_btn(text: str, min_width: int = 180) -> QPushButton:
-    btn = QPushButton(text)
-    btn.setMinimumWidth(min_width)
-    btn.setMinimumHeight(36)
-    btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    btn.setFont(QFont(FONT_SANS, 13, QFont.Weight.Bold))
-    _apply_primary(btn)
-    theme_manager.theme_changed.connect(lambda _: _apply_primary(btn))
-    return btn
-
-
-def _make_secondary_btn(text: str, min_width: int = 120) -> QPushButton:
-    btn = QPushButton(text)
-    btn.setMinimumWidth(min_width)
-    btn.setMinimumHeight(36)
-    btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    btn.setFont(QFont(FONT_SANS, 12))
-    _apply_secondary(btn)
-    theme_manager.theme_changed.connect(lambda _: _apply_secondary(btn))
-    return btn
-
-
-def _apply_primary(btn: QPushButton):
-    text_color = "#ffffff" if theme_manager.mode == "light" else "#001826"
-    btn.setStyleSheet(f"""
-        QPushButton {{
-            background-color: {COLORS["accent"]};
-            color: {text_color};
-            border: none;
-            border-radius: 6px;
-            padding: 8px 20px;
-            font-weight: 700;
-            font-size: 13px;
-        }}
-        QPushButton:hover   {{ background-color: {COLORS["accent_hover"]}; }}
-        QPushButton:pressed {{ background-color: {COLORS["accent_press"]}; }}
-        QPushButton:disabled {{
-            background-color: {COLORS["panel_hover"]};
-            color: {COLORS["text_disabled"]};
-        }}
-    """)
-
-
-def _apply_secondary(btn: QPushButton):
-    btn.setStyleSheet(f"""
-        QPushButton {{
-            background-color: transparent;
-            color: {COLORS["text"]};
-            border: 1.5px solid {COLORS["btn_border"]};
-            border-radius: 6px;
-            padding: 8px 16px;
-            font-size: 12px;
-        }}
-        QPushButton:hover {{
-            background-color: {COLORS["panel_hover"]};
-            border-color: {COLORS["text_dim"]};
-        }}
-        QPushButton:pressed {{ background-color: {COLORS["panel_press"]}; }}
-    """)
 
 
 # ---------------------------------------------------------------------------
@@ -187,8 +124,8 @@ class _AgendarDialog(QDialog):
 
         btn_row   = QHBoxLayout()
         btn_row.setSpacing(8)
-        b_cancel  = make_btn("Cancelar",     "secondary", min_width=110)
-        b_confirm = make_btn("Criar tarefa", "primary",   min_width=130)
+        b_cancel  = make_secondary_btn("CANCELAR",     110)
+        b_confirm = make_primary_btn("CRIAR TAREFA", 130)
         b_cancel.clicked.connect(self.reject)
         b_confirm.clicked.connect(self._criar)
         btn_row.addStretch()
@@ -262,7 +199,7 @@ class _PathField(QWidget):
         self._edit.setPlaceholderText(placeholder)
         self._edit.setMinimumHeight(28)
 
-        self._btn = make_btn("", "secondary", min_width=40)
+        self._btn = make_secondary_btn("", 40)
         self._btn.setIcon(
             QApplication.style().standardIcon(
                 QApplication.style().StandardPixmap.SP_DirOpenIcon
@@ -414,8 +351,8 @@ class _StepConfig(QWidget):
         foot_lay.setContentsMargins(0, 8, 0, 0)
         foot_lay.setSpacing(6)
 
-        self._btn_backup   = _make_primary_btn("Iniciar BACKUP",    200)
-        self._btn_restaure = _make_secondary_btn("Iniciar RESTAURE", 200)
+        self._btn_backup   = make_primary_btn("INICIAR BACKUP",    200)
+        self._btn_restaure = make_secondary_btn("INICIAR RESTAURE", 200)
         self._btn_backup.clicked.connect(self._on_backup)
         self._btn_restaure.clicked.connect(self._on_restaure)
 
@@ -577,7 +514,7 @@ class _StepBackup(QWidget):
         footer  = QWidget()
         f_lay   = QHBoxLayout(footer)
         f_lay.setContentsMargins(0, 8, 0, 0)
-        self._btn_cancel = _make_secondary_btn("Cancelar", 140)
+        self._btn_cancel = make_secondary_btn("CANCELAR", 140)
         self._btn_cancel.clicked.connect(self._cancelar)
         f_lay.addStretch()
         f_lay.addWidget(self._btn_cancel)
@@ -629,7 +566,7 @@ class _StepRestaure(QWidget):
         footer  = QWidget()
         f_lay   = QHBoxLayout(footer)
         f_lay.setContentsMargins(0, 8, 0, 0)
-        self._btn_cancel = _make_secondary_btn("Cancelar", 140)
+        self._btn_cancel = make_secondary_btn("CANCELAR", 140)
         self._btn_cancel.clicked.connect(self._cancelar)
         f_lay.addStretch()
         f_lay.addWidget(self._btn_cancel)
@@ -692,11 +629,11 @@ class _StepResultado(QWidget):
         lay.addWidget(h_line())
 
         # Menu Principal: sempre visivel
-        self._btn_menu = _make_secondary_btn("Menu Principal", 160)
+        self._btn_menu = make_secondary_btn("MENU PRINCIPAL", 160)
         self._btn_menu.clicked.connect(self.go_menu.emit)
 
         # Iniciar RESTAURE: visivel apenas apos backup bem-sucedido
-        self._btn_restaure = _make_primary_btn("Iniciar RESTAURE", 200)
+        self._btn_restaure = make_primary_btn("INICIAR RESTAURE", 200)
         self._btn_restaure.clicked.connect(self._on_iniciar_restaure)
         self._btn_restaure.setVisible(False)
 

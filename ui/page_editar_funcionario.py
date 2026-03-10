@@ -31,7 +31,8 @@ from ui.theme import COLORS, FONT_SANS, FONT_MONO
 from ui.theme_manager import theme_manager
 from ui.widgets import (
     PageTitle, SectionHeader, AlertBox, ResultBox,
-    make_btn, h_line, label, spacer,
+    make_primary_btn, make_secondary_btn, btn_row,
+    h_line, label, spacer,
 )
 from core.logger import log
 from core.db_funcionario import (
@@ -52,69 +53,6 @@ _DEFAULT_PASSWORD = "sbofutura"
 # Helpers de botao (mesmo padrao do projeto)
 # ---------------------------------------------------------------------------
 
-def _make_primary_btn(text: str, min_width: int = 160) -> QPushButton:
-    btn = QPushButton(text)
-    btn.setMinimumWidth(min_width)
-    btn.setMinimumHeight(28)
-    btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    btn.setFont(QFont(FONT_SANS, 11, QFont.Weight.Bold))
-    _apply_primary(btn)
-    theme_manager.theme_changed.connect(lambda _: _apply_primary(btn))
-    return btn
-
-
-def _make_secondary_btn(text: str, min_width: int = 120) -> QPushButton:
-    btn = QPushButton(text)
-    btn.setMinimumWidth(min_width)
-    btn.setMinimumHeight(28)
-    btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    btn.setFont(QFont(FONT_SANS, 10))
-    _apply_secondary(btn)
-    theme_manager.theme_changed.connect(lambda _: _apply_secondary(btn))
-    return btn
-
-
-def _apply_primary(btn: QPushButton):
-    text_color = "#ffffff" if theme_manager.mode == "light" else "#001826"
-    btn.setStyleSheet(f"""
-        QPushButton {{
-            background-color: {COLORS['accent']};
-            color: {text_color};
-            border: none;
-            border-radius: 5px;
-            padding: 5px 14px;
-            font-weight: 700;
-            font-size: 10px;
-        }}
-        QPushButton:hover   {{ background-color: {COLORS['accent_hover']}; }}
-        QPushButton:pressed {{ background-color: {COLORS['accent_press']}; }}
-        QPushButton:disabled {{
-            background-color: {COLORS['panel_hover']};
-            color: {COLORS['text_disabled']};
-        }}
-    """)
-
-
-def _apply_secondary(btn: QPushButton):
-    btn.setStyleSheet(f"""
-        QPushButton {{
-            background-color: transparent;
-            color: {COLORS['text']};
-            border: 1.5px solid {COLORS['btn_border']};
-            border-radius: 5px;
-            padding: 5px 12px;
-            font-size: 10px;
-        }}
-        QPushButton:hover {{
-            background-color: {COLORS['panel_hover']};
-            border-color: {COLORS['text_dim']};
-        }}
-        QPushButton:pressed {{ background-color: {COLORS['panel_press']}; }}
-        QPushButton:disabled {{
-            color: {COLORS['text_disabled']};
-            border-color: {COLORS['text_disabled']};
-        }}
-    """)
 
 
 # ---------------------------------------------------------------------------
@@ -650,13 +588,10 @@ class _StepFormulario(QWidget):
         lay.addWidget(self._fld_db)
 
         # Botao testar conexao (logo abaixo dos campos de conexao)
-        self._btn_testar = _make_primary_btn("Testar Conexão", 144)
+        self._btn_testar = make_primary_btn("TESTAR CONEXÃO", 160)
         self._btn_testar.clicked.connect(self._on_testar)
         self._btn_testar.setEnabled(FDB_DISPONIVEL)
-        _testar_row = QHBoxLayout()
-        _testar_row.addWidget(self._btn_testar)
-        _testar_row.addStretch()
-        lay.addLayout(_testar_row)
+        lay.addWidget(btn_row(self._btn_testar))
 
         # --- Dados ---
         lay.addWidget(SectionHeader("Dados do Funcionário"))
@@ -674,7 +609,7 @@ class _StepFormulario(QWidget):
         btn_busca_wrap_lay.setContentsMargins(0, 0, 0, 0)
         btn_busca_wrap_lay.setSpacing(3)
         btn_busca_wrap_lay.addWidget(QLabel(""))
-        self._btn_buscar_nome = _make_secondary_btn("Buscar", 90)
+        self._btn_buscar_nome = make_secondary_btn("BUSCAR", 90)
         self._btn_buscar_nome.clicked.connect(self._on_buscar_nome)
         self._btn_buscar_nome.setEnabled(FDB_DISPONIVEL)
         btn_busca_wrap_lay.addWidget(self._btn_buscar_nome)
@@ -710,7 +645,7 @@ class _StepFormulario(QWidget):
             "Ex: 42",
             input_type="number",
         )
-        self._btn_pesquisar_id = _make_secondary_btn("Pesquisar ID", 130)
+        self._btn_pesquisar_id = make_secondary_btn("PESQUISAR ID", 140)
         self._btn_pesquisar_id.clicked.connect(self._on_pesquisar_id)
         self._btn_pesquisar_id.setEnabled(FDB_DISPONIVEL)
         # Alinha o botao verticalmente com o campo (adiciona label vazio para compensar)
@@ -761,17 +696,12 @@ class _StepFormulario(QWidget):
         foot_lay.setContentsMargins(0, 5, 0, 0)
         foot_lay.setSpacing(3)
 
-        self._btn_alterar = _make_primary_btn("Alterar PIS", 180)
+        self._btn_alterar = make_primary_btn("ALTERAR PIS", 180)
         self._btn_alterar.clicked.connect(self._on_buscar)
         self._btn_alterar.setEnabled(FDB_DISPONIVEL)
 
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(7)
-        btn_row.addWidget(self._btn_alterar)
-        btn_row.addStretch()
-
         foot_lay.addWidget(h_line())
-        foot_lay.addLayout(btn_row)
+        foot_lay.addWidget(btn_row(self._btn_alterar))
         root.addWidget(footer, 0)
 
     def _upd_lista_frame(self, _mode: str = ""):
@@ -826,7 +756,7 @@ class _StepFormulario(QWidget):
         self._worker_busca_nome.finished.connect(
             lambda: (
                 self._btn_buscar_nome.setEnabled(FDB_DISPONIVEL),
-                self._btn_buscar_nome.setText("Buscar"),
+                self._btn_buscar_nome.setText("BUSCAR"),
             )
         )
         self._worker_busca_nome.start()
@@ -926,7 +856,7 @@ class _StepFormulario(QWidget):
         self._worker_nome.finished.connect(
             lambda: (
                 self._btn_pesquisar_id.setEnabled(FDB_DISPONIVEL),
-                self._btn_pesquisar_id.setText("Pesquisar ID"),
+                self._btn_pesquisar_id.setText("PESQUISAR ID"),
             )
         )
         self._worker_nome.start()
@@ -964,7 +894,7 @@ class _StepFormulario(QWidget):
         self._worker_teste.sucesso.connect(self._on_teste_ok)
         self._worker_teste.erro.connect(self._on_teste_erro)
         self._worker_teste.finished.connect(
-            lambda: self._btn_testar.setText("Testar Conexão")
+            lambda: self._btn_testar.setText("TESTAR CONEXÃO")
         )
         self._worker_teste.start()
 
@@ -1064,17 +994,12 @@ class _StepConfirmacao(QWidget):
         lay.addStretch()
         lay.addWidget(h_line())
 
-        self._btn_confirmar = _make_primary_btn("Confirmar e Salvar", 200)
-        self._btn_voltar    = _make_secondary_btn("Voltar", 120)
+        self._btn_confirmar = make_primary_btn("CONFIRMAR E SALVAR", 200)
+        self._btn_voltar    = make_secondary_btn("VOLTAR", 120)
         self._btn_confirmar.clicked.connect(self._on_confirmar)
         self._btn_voltar.clicked.connect(self.voltar.emit)
 
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(7)
-        btn_row.addWidget(self._btn_voltar)
-        btn_row.addWidget(self._btn_confirmar)
-        btn_row.addStretch()
-        lay.addLayout(btn_row)
+        lay.addWidget(btn_row(self._btn_voltar, self._btn_confirmar))
 
     def carregar(self, dados: dict, novo_pis: str):
         self._painel.carregar(dados, novo_pis)
@@ -1119,17 +1044,12 @@ class _StepResultado(QWidget):
         lay.addStretch()
         lay.addWidget(h_line())
 
-        self._btn_nova  = _make_primary_btn("Nova Edição", 160)
-        self._btn_menu  = _make_secondary_btn("Menu Principal", 160)
+        self._btn_nova  = make_primary_btn("NOVA EDIÇÃO", 180)
+        self._btn_menu  = make_secondary_btn("MENU PRINCIPAL", 180)
         self._btn_nova.clicked.connect(self.nova_edicao.emit)
         self._btn_menu.clicked.connect(self.go_menu.emit)
 
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(7)
-        btn_row.addWidget(self._btn_nova)
-        btn_row.addWidget(self._btn_menu)
-        btn_row.addStretch()
-        lay.addLayout(btn_row)
+        lay.addWidget(btn_row(self._btn_nova, self._btn_menu))
 
     def set_resultado(self, sucesso: bool, fk_cadastro: str, novo_pis: str, erro: str = ""):
         lay = self.layout()

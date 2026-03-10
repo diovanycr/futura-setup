@@ -28,102 +28,14 @@ from PyQt6.QtGui import QFont, QPainter, QColor, QBrush
 
 from ui.widgets import (
     PageTitle, SectionHeader, AlertBox, LogConsole,
-    ServerItem, spacer, LoadingSpinner, FadeStackedWidget
+    ServerItem, spacer, LoadingSpinner, FadeStackedWidget,
+    make_primary_btn, make_secondary_btn, btn_row
 )
 from ui.theme import COLORS, FONT_MONO, FONT_SANS
 from ui.theme_manager import theme_manager
 from core.network import ScanWorker, Servidor
 
 
-# ── HELPERS DE BOTÃO ─────────────────────────────────────────────────────────
-# Aplicam estilo inline para garantir que primary/secondary sejam visíveis
-# independente de herança ou ordem do stylesheet global.
-
-def _make_primary_btn(text: str, min_width: int = 160) -> QPushButton:
-    btn = QPushButton(text)
-    btn.setMinimumWidth(min_width)
-    btn.setMinimumHeight(36)
-    btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    btn.setFont(QFont(FONT_SANS, 13, QFont.Weight.Bold))
-    _apply_primary(btn)
-    theme_manager.theme_changed.connect(lambda _: _apply_primary(btn))
-    return btn
-
-def _make_secondary_btn(text: str, min_width: int = 120) -> QPushButton:
-    btn = QPushButton(text)
-    btn.setMinimumWidth(min_width)
-    btn.setMinimumHeight(36)
-    btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    btn.setFont(QFont(FONT_SANS, 13))
-    _apply_secondary(btn)
-    theme_manager.theme_changed.connect(lambda _: _apply_secondary(btn))
-    return btn
-
-def _apply_primary(btn: QPushButton):
-    accent        = COLORS["accent"]
-    accent_hover  = COLORS["accent_hover"]
-    accent_press  = COLORS["accent_press"]
-    text_color    = "#ffffff" if theme_manager.mode == "light" else "#001826"
-    btn.setStyleSheet(f"""
-        QPushButton {{
-            background-color: {accent};
-            color: {text_color};
-            border: none;
-            border-radius: 6px;
-            padding: 8px 20px;
-            font-weight: 700;
-            font-size: 13px;
-        }}
-        QPushButton:hover {{
-            background-color: {accent_hover};
-        }}
-        QPushButton:pressed {{
-            background-color: {accent_press};
-        }}
-        QPushButton:disabled {{
-            background-color: {COLORS['panel_hover']};
-            color: {COLORS['text_disabled']};
-        }}
-    """)
-
-def _apply_secondary(btn: QPushButton):
-    btn.setStyleSheet(f"""
-        QPushButton {{
-            background-color: transparent;
-            color: {COLORS['text']};
-            border: 1.5px solid {COLORS['btn_border']};
-            border-radius: 6px;
-            padding: 8px 20px;
-            font-size: 13px;
-        }}
-        QPushButton:hover {{
-            background-color: {COLORS['panel_hover']};
-            border-color: {COLORS['text_dim']};
-        }}
-        QPushButton:pressed {{
-            background-color: {COLORS['panel_press']};
-        }}
-        QPushButton[class="danger"] {{
-            background-color: {COLORS['danger_dim']};
-            border: 1.5px solid {COLORS['danger']};
-            color: {COLORS['danger']};
-        }}
-        QPushButton[class="danger"]:hover {{
-            background-color: {COLORS['danger']};
-            color: #ffffff;
-        }}
-    """)
-
-def _make_danger_btn(text: str, min_width: int = 140) -> QPushButton:
-    btn = QPushButton(text)
-    btn.setProperty("class", "danger")
-    btn.setMinimumWidth(min_width)
-    btn.setMinimumHeight(36)
-    btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    btn.setFont(QFont(FONT_SANS, 12, QFont.Weight.Bold))
-    _apply_secondary(btn) # Reutiliza o sistema de estilo
-    theme_manager.theme_changed.connect(lambda _: _apply_secondary(btn))
-    return btn
 
 
 # ── TOGGLE SWITCH ─────────────────────────────────────────────────────────────
@@ -316,6 +228,7 @@ class PageScan(QWidget):
         self._server_widgets: list[ServerItem] = []
         self._selected_servidor: Servidor | None = None
         self._toggle_rows: list[MethodCard] = []
+        self._scan_console = LogConsole()
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(40, 36, 40, 36)
@@ -329,6 +242,8 @@ class PageScan(QWidget):
         self._stack.addWidget(self._build_method_page())
         self._stack.addWidget(self._build_scanning_page())
         self._stack.addWidget(self._build_results_page())
+
+        self._build_hist_section()
 
     # ── BUILD ──────────────────────────────────────────────────────────────────
 
@@ -372,23 +287,13 @@ class PageScan(QWidget):
         lay.addWidget(spacer(h=8))
 
         # ── Botões centralizados ──────────────────────────────────────────────
-        self._btn_scan = _make_primary_btn("▶  Iniciar Escaneamento", 210)
+        self._btn_scan = make_primary_btn("▶  INICIAR ESCANEAMENTO", 240)
         self._btn_scan.clicked.connect(self._start_scan)
 
-        self._btn_cancel = _make_secondary_btn("Cancelar", 110)
+        self._btn_cancel = make_secondary_btn("CANCELAR", 130)
         self._btn_cancel.clicked.connect(self.cancelado.emit)
 
-        btns = QHBoxLayout()
-        btns.setSpacing(10)
-        btns.addStretch()
-        btns.addWidget(self._btn_scan)
-        btns.addWidget(self._btn_cancel)
-        btns.addStretch()
-
-        btn_w = QWidget()
-        btn_w.setLayout(btns)
-        btn_w.setStyleSheet("background: transparent;")
-        lay.addWidget(btn_w)
+        lay.addWidget(btn_row(self._btn_scan, self._btn_cancel))
 
         lay.addWidget(spacer(h=8))
 
@@ -481,22 +386,12 @@ class PageScan(QWidget):
         status_lay.addWidget(self._status_lbl)
         status_lay.addWidget(self._status_sub)
 
-        self._scan_console = LogConsole(max_height=220)
-
-        btn_stop = _make_danger_btn("✕  INTERROMPER", 160)
+        btn_stop = make_secondary_btn("✕  INTERROMPER", 160)
         btn_stop.clicked.connect(self._stop_scan)
-
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
-        btn_row.addWidget(btn_stop)
-        btn_row.addStretch()
-        btn_row_w = QWidget()
-        btn_row_w.setLayout(btn_row)
-        btn_row_w.setStyleSheet("background: transparent;")
 
         lay.addWidget(status_box)
         lay.addWidget(self._scan_console)
-        lay.addWidget(btn_row_w)
+        lay.addWidget(btn_row(btn_stop))
         lay.addStretch()
 
         return w
@@ -527,23 +422,13 @@ class PageScan(QWidget):
         scroll.setWidget(self._server_container)
         lay.addWidget(scroll, 1)  # stretch=1 — ocupa todo espaço restante
 
-        self._btn_usar = _make_primary_btn("Usar Servidor Selecionado", 220)
+        self._btn_usar = make_primary_btn("USAR SERVIDOR SELECIONADO", 240)
         self._btn_usar.clicked.connect(self._confirm_server)
 
-        btn_novo = _make_secondary_btn("← Novo Escaneamento", 180)
+        btn_novo = make_secondary_btn("← NOVO ESCANEAMENTO", 180)
         btn_novo.clicked.connect(lambda: self._stack.setCurrentIndex(0))
 
-        btns = QHBoxLayout()
-        btns.setSpacing(10)
-        btns.addStretch()
-        btns.addWidget(self._btn_usar)
-        btns.addWidget(btn_novo)
-        btns.addStretch()
-
-        btn_w = QWidget()
-        btn_w.setLayout(btns)
-        btn_w.setStyleSheet("background: transparent;")
-        lay.addWidget(btn_w)
+        lay.addWidget(btn_row(self._btn_usar, btn_novo))
         return w
 
     # ── AÇÕES ─────────────────────────────────────────────────────────────────

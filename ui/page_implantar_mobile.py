@@ -28,8 +28,8 @@ from PyQt6.QtWidgets import (
 from ui.theme import COLORS, FONT_SANS, FONT_MONO
 from ui.theme_manager import theme_manager
 from ui.widgets import (
-    PageTitle, SectionHeader, AlertBox,
-    h_line,
+    PageTitle, SectionHeader, AlertBox, make_primary_btn, make_secondary_btn,
+    btn_row, spacer, label, h_line,
 )
 from core.logger import log
 from core.db_mobile import (
@@ -47,69 +47,6 @@ _DEFAULT_PASSWORD = "sbofutura"
 # Helpers de botao
 # ---------------------------------------------------------------------------
 
-def _make_primary_btn(text: str, min_width: int = 160) -> QPushButton:
-    btn = QPushButton(text)
-    btn.setMinimumWidth(min_width)
-    btn.setMinimumHeight(28)
-    btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    btn.setFont(QFont(FONT_SANS, 11, QFont.Weight.Bold))
-    _apply_primary(btn)
-    theme_manager.theme_changed.connect(lambda _: _apply_primary(btn))
-    return btn
-
-
-def _make_secondary_btn(text: str, min_width: int = 96) -> QPushButton:
-    btn = QPushButton(text)
-    btn.setMinimumWidth(min_width)
-    btn.setMinimumHeight(28)
-    btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    btn.setFont(QFont(FONT_SANS, 10))
-    _apply_secondary(btn)
-    theme_manager.theme_changed.connect(lambda _: _apply_secondary(btn))
-    return btn
-
-
-def _apply_primary(btn: QPushButton):
-    text_color = "#ffffff" if theme_manager.mode == "light" else "#001826"
-    btn.setStyleSheet(f"""
-        QPushButton {{
-            background-color: {COLORS['accent']};
-            color: {text_color};
-            border: none;
-            border-radius: 5px;
-            padding: 5px 14px;
-            font-weight: 700;
-            font-size: 11px;
-        }}
-        QPushButton:hover   {{ background-color: {COLORS['accent_hover']}; }}
-        QPushButton:pressed {{ background-color: {COLORS['accent_press']}; }}
-        QPushButton:disabled {{
-            background-color: {COLORS['panel_hover']};
-            color: {COLORS['text_disabled']};
-        }}
-    """)
-
-
-def _apply_secondary(btn: QPushButton):
-    btn.setStyleSheet(f"""
-        QPushButton {{
-            background-color: transparent;
-            color: {COLORS['text']};
-            border: 1.5px solid {COLORS['btn_border']};
-            border-radius: 5px;
-            padding: 5px 12px;
-            font-size: 10px;
-        }}
-        QPushButton:hover {{
-            background-color: {COLORS['panel_hover']};
-            border-color: {COLORS['text_dim']};
-        }}
-        QPushButton:pressed {{ background-color: {COLORS['panel_press']}; }}
-        QPushButton:disabled {{
-            color: {COLORS['text_disabled']};
-            border-color: {COLORS['text_disabled']};
-        }}
-    """)
 
 
 # ---------------------------------------------------------------------------
@@ -406,13 +343,10 @@ class _StepFormulario(QWidget):
         lay.addWidget(self._fld_db)
 
         # Botao testar conexao
-        self._btn_testar = _make_primary_btn("Testar Conexão", 144)
+        self._btn_testar = make_primary_btn("TESTAR CONEXÃO", 160)
         self._btn_testar.clicked.connect(self._on_testar)
         self._btn_testar.setEnabled(FDB_DISPONIVEL)
-        _testar_row = QHBoxLayout()
-        _testar_row.addWidget(self._btn_testar)
-        _testar_row.addStretch()
-        lay.addLayout(_testar_row)
+        lay.addWidget(btn_row(self._btn_testar))
 
         # Resumo dos scripts que serao rodados
         lay.addWidget(SectionHeader("Scripts que serão executados"))
@@ -432,21 +366,16 @@ class _StepFormulario(QWidget):
         foot_lay.setContentsMargins(0, 5, 0, 0)
         foot_lay.setSpacing(4)
 
-        self._btn_implantar = _make_primary_btn("Implantar Mobile", 144)
+        self._btn_implantar = make_primary_btn("IMPLANTAR MOBILE", 180)
         self._btn_implantar.clicked.connect(self._on_implantar)
         self._btn_implantar.setEnabled(FDB_DISPONIVEL)
 
-        self._btn_remover = _make_secondary_btn("Remover CHANGE_TABLET", 180)
+        self._btn_remover = make_secondary_btn("REMOVER CHANGE_TABLET", 200)
         self._btn_remover.clicked.connect(self._on_remover)
         self._btn_remover.setEnabled(True)
 
-        btn_row = QHBoxLayout()
-        btn_row.addWidget(self._btn_implantar)
-        btn_row.addWidget(self._btn_remover)
-        btn_row.addStretch()
-
         foot_lay.addWidget(h_line())
-        foot_lay.addLayout(btn_row)
+        foot_lay.addWidget(btn_row(self._btn_implantar, self._btn_remover))
         root.addWidget(footer, 0)
 
     # --- Testar conexao ---
@@ -464,7 +393,7 @@ class _StepFormulario(QWidget):
         self._worker_teste.sucesso.connect(self._on_teste_ok)
         self._worker_teste.erro.connect(self._on_teste_erro)
         self._worker_teste.finished.connect(
-            lambda: self._btn_testar.setText("Testar Conexão")
+            lambda: self._btn_testar.setText("TESTAR CONEXÃO")
         )
         self._worker_teste.start()
 
@@ -477,6 +406,7 @@ class _StepFormulario(QWidget):
         self._alert.set_text(f"Falha na conexão: {msg}")
         self._alert.set_kind("danger")
         self._btn_testar.setEnabled(True)
+        self._btn_testar.setText("TESTAR CONEXÃO")
 
     # --- Implantar ---
 
@@ -577,16 +507,12 @@ class _StepResultado(QWidget):
 
         self._root_lay.addWidget(h_line())
 
-        self._btn_nova = _make_primary_btn("Nova Implantação", 144)
-        self._btn_menu = _make_secondary_btn("Menu Principal", 128)
+        self._btn_nova = make_primary_btn("NOVA IMPLANTAÇÃO", 180)
+        self._btn_menu = make_secondary_btn("MENU PRINCIPAL", 160)
         self._btn_nova.clicked.connect(self.nova_implantacao.emit)
         self._btn_menu.clicked.connect(self.go_menu.emit)
 
-        btn_row = QHBoxLayout()
-        btn_row.addWidget(self._btn_nova)
-        btn_row.addWidget(self._btn_menu)
-        btn_row.addStretch()
-        self._root_lay.addLayout(btn_row)
+        self._root_lay.addWidget(btn_row(self._btn_nova, self._btn_menu))
 
     def set_resultado(self, resultados: list[dict[str, Any]]):
         # Limpa paineis anteriores

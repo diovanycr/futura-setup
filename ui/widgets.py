@@ -22,10 +22,12 @@ import html
 from PyQt6.QtWidgets import (
     QWidget, QLabel, QHBoxLayout, QVBoxLayout,
     QPushButton, QFrame, QProgressBar, QTextEdit,
-    QSizePolicy, QRadioButton, QDialog, QStackedWidget
+    QSizePolicy, QRadioButton, QDialog, QStackedWidget,
+    QGridLayout, QScrollArea, QFileDialog, QLineEdit
 )
-from PyQt6.QtCore import Qt, pyqtSignal, pyqtProperty, QPropertyAnimation, QEasingCurve
-from PyQt6.QtGui import QFont, QPainter, QColor, QBrush, QPen
+from PyQt6.QtCore import Qt, pyqtSignal, pyqtProperty, QPropertyAnimation, QEasingCurve, QByteArray, QRectF
+from PyQt6.QtGui import QFont, QPainter, QColor, QBrush, QPen, QIcon, QPixmap
+from PyQt6.QtSvg import QSvgRenderer
 
 from ui.theme import COLORS, FONT_MONO, FONT_SANS
 from ui.theme_manager import theme_manager
@@ -87,19 +89,77 @@ def spacer(w: int = 0, h: int = 0) -> QWidget:
     return sp
 
 
-def make_btn_row(btns_def: list, back=None) -> QWidget:
+# ── BUTTON HELPERS ────────────────────────────────────────────────────────────
+
+def _apply_btn_base(btn: QPushButton, min_width: int):
+    btn.setMinimumWidth(min_width)
+    btn.setMinimumHeight(40)
+    btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+def _apply_primary_style(btn: QPushButton):
+    text_color = "#ffffff" if theme_manager.mode == "light" else "#001826"
+    btn.setStyleSheet(f"""
+        QPushButton {{
+            background-color: {COLORS["accent"]};
+            color: {text_color};
+            border: none;
+            border-radius: 8px;
+            padding: 8px 24px;
+            font-weight: 700;
+            font-size: 13px;
+        }}
+        QPushButton:hover {{ background-color: {COLORS["accent_hover"]}; }}
+        QPushButton:pressed {{ background-color: {COLORS["accent_press"]}; }}
+        QPushButton:disabled {{
+            background-color: {COLORS['panel_hover']};
+            color: {COLORS['text_disabled']};
+        }}
+    """)
+
+def _apply_secondary_style(btn: QPushButton):
+    btn.setStyleSheet(f"""
+        QPushButton {{
+            background-color: transparent;
+            color: {COLORS["text"]};
+            border: 1.5px solid {COLORS["btn_border"]};
+            border-radius: 8px;
+            padding: 8px 24px;
+            font-size: 13px;
+            font-weight: 500;
+        }}
+        QPushButton:hover {{
+            background-color: {COLORS["panel_hover"]};
+            border-color: {COLORS["text_dim"]};
+        }}
+        QPushButton:pressed {{ background-color: {COLORS["panel_press"]}; }}
+    """)
+
+def make_primary_btn(text: str, min_width: int = 180) -> QPushButton:
+    btn = QPushButton(text)
+    _apply_btn_base(btn, min_width)
+    btn.setFont(QFont(FONT_SANS, 10, QFont.Weight.Bold))
+    _apply_primary_style(btn)
+    theme_manager.theme_changed.connect(lambda _: _apply_primary_style(btn))
+    return btn
+
+def make_secondary_btn(text: str, min_width: int = 120) -> QPushButton:
+    btn = QPushButton(text)
+    _apply_btn_base(btn, min_width)
+    btn.setFont(QFont(FONT_SANS, 10))
+    _apply_secondary_style(btn)
+    theme_manager.theme_changed.connect(lambda _: _apply_secondary_style(btn))
+    return btn
+
+def btn_row(*btns, centered: bool = True) -> QWidget:
+    """Cria uma linha de botões centralizada ou alinhada à esquerda."""
     row = QHBoxLayout()
-    row.setSpacing(8)
-    for text, cls, fn in btns_def:
-        btn = make_btn(text, cls, 220)
-        btn.clicked.connect(fn)
+    row.setSpacing(12)
+    if centered: row.addStretch()
+    for btn in btns:
         row.addWidget(btn)
-    if back:
-        btn_b = make_btn("← VOLTAR")
-        btn_b.clicked.connect(back)
-        row.addWidget(btn_b)
     row.addStretch()
     w = QWidget()
+    w.setContentsMargins(0, 0, 0, 0)
     w.setLayout(row)
     w.setStyleSheet("background: transparent;")
     return w
@@ -595,13 +655,13 @@ class StepIndicator(QWidget):
             sl.setSpacing(4)
 
             circle = QLabel(str(i + 1))
-            circle.setFixedSize(24, 24)
+            circle.setFixedSize(22, 22)
             circle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            circle.setFont(QFont(FONT_SANS, 10, QFont.Weight.Bold))
+            circle.setFont(QFont(FONT_SANS, 9, QFont.Weight.Bold))
             self._circles.append(circle)
 
             lbl = QLabel(name)
-            lbl.setFont(QFont(FONT_SANS, 10))
+            lbl.setFont(QFont(FONT_SANS, 8))
             lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
             self._labels.append(lbl)
 
@@ -634,7 +694,7 @@ class StepIndicator(QWidget):
             elif i == self._current:
                 circle.setStyleSheet(
                     f"background: {COLORS['accent']}; color: #fff;"
-                    "border-radius: 12px; border: none;"
+                    "border-radius: 11px; border: none;"
                 )
                 lbl.setStyleSheet(f"color: {COLORS['accent']}; font-weight: 600; background: transparent; border: none;")
             else:
@@ -824,7 +884,14 @@ class _DestOpt(QWidget):
         super().__init__(parent)
         self.rid = rid
         self.setObjectName(f"dest_opt_{rid}")
+        self._state    = "normal"
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        # Animação de lift (pos)
+        self._offset_y = 0
+        self._lift_anim = QPropertyAnimation(self, b"offset_y")
+        self._lift_anim.setDuration(150)
+        self._lift_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
 
         lay = QHBoxLayout(self)
         lay.setContentsMargins(12, 0, 12, 0)
@@ -842,32 +909,76 @@ class _DestOpt(QWidget):
         lay.addWidget(self._lbl)
         lay.addStretch()
 
+        self.apply_selected(False)
+        theme_manager.theme_changed.connect(lambda _: self.apply_selected(self._is_selected()))
+
+    def _is_selected(self):
+        # Helper para pegar o estado real via parent se necessário, 
+        # mas quem controla é o DestPanel chamando apply_selected.
+        # Vamos manter o estado local para o hover.
+        return getattr(self, "_selected_state", False)
+
+    @pyqtProperty(int)
+    def offset_y(self): return self._offset_y
+    @offset_y.setter
+    def offset_y(self, val):
+        self._offset_y = val
+        self.update()
+
+    def enterEvent(self, e):
+        self._state = "hover"
+        self.apply_selected(self._is_selected())
+        self._lift_anim.stop()
+        self._lift_anim.setEndValue(-2)
+        self._lift_anim.start()
+
+    def leaveEvent(self, e):
+        self._state = "normal"
+        self.apply_selected(self._is_selected())
+        self._lift_anim.stop()
+        self._lift_anim.setEndValue(0)
+        self._lift_anim.start()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if self._offset_y != 0:
+            painter.translate(0, self._offset_y)
+        super().paintEvent(event)
+
     def mousePressEvent(self, e):
         if e.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit(self.rid)
 
     def apply_selected(self, selected: bool):
+        self._selected_state = selected
         rid = self.rid
+        
         if selected:
-            self.setStyleSheet(
-                f"QWidget#dest_opt_{rid} {{ background: {COLORS['accent_dim']}; border-radius: 5px; border: none; }}"
-            )
-            self._lbl.setStyleSheet(
-                f"color: {COLORS['accent']}; font-weight: 600; background: transparent; border: none;"
-            )
-            self._dot.setStyleSheet(
-                f"background: {COLORS['accent']}; border-radius: 5px; border: none;"
-            )
+            bg     = COLORS['accent_dim']
+            border = "none"
+            l_clr  = COLORS['accent']
+            l_wght = 600
+            d_bg   = COLORS['accent']
+            d_brd  = "none"
+        elif self._state == "hover":
+            bg     = COLORS['panel_hover']
+            border = f"1px solid {COLORS['border_light']}"
+            l_clr  = COLORS['text']
+            l_wght = "normal"
+            d_bg   = "transparent"
+            d_brd  = f"1.5px solid {COLORS['text_dim']}"
         else:
-            self.setStyleSheet(
-                f"QWidget#dest_opt_{rid} {{ background: transparent; border-radius: 5px; border: none; }}"
-            )
-            self._lbl.setStyleSheet(
-                f"color: {COLORS['text_mid']}; font-weight: normal; background: transparent; border: none;"
-            )
-            self._dot.setStyleSheet(
-                f"background: transparent; border-radius: 5px; border: 1.5px solid {COLORS['border']};"
-            )
+            bg     = "transparent"
+            border = "none"
+            l_clr  = COLORS['text_mid']
+            l_wght = "normal"
+            d_bg   = "transparent"
+            d_brd  = f"1.5px solid {COLORS['border']}"
+
+        self.setStyleSheet(f"QWidget#dest_opt_{rid} {{ background: {bg}; border-radius: 5px; border: {border}; }}")
+        self._lbl.setStyleSheet(f"color: {l_clr}; font-weight: {l_wght}; background: transparent; border: none;")
+        self._dot.setStyleSheet(f"background: {d_bg}; border-radius: 5px; border: {d_brd};")
 
 
 class DestPanel(QWidget):
@@ -939,6 +1050,12 @@ class RadioRow(QWidget):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setObjectName("RadioRow")
 
+        # Animação de lift (pos)
+        self._offset_y = 0
+        self._lift_anim = QPropertyAnimation(self, b"offset_y")
+        self._lift_anim.setDuration(150)
+        self._lift_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
@@ -988,10 +1105,30 @@ class RadioRow(QWidget):
     def enterEvent(self, e):
         self._state = "hover"
         self._upd()
+        self._lift_anim.stop()
+        self._lift_anim.setEndValue(-2)
+        self._lift_anim.start()
 
     def leaveEvent(self, e):
         self._state = "normal"
         self._upd()
+        self._lift_anim.stop()
+        self._lift_anim.setEndValue(0)
+        self._lift_anim.start()
+
+    @pyqtProperty(int)
+    def offset_y(self): return self._offset_y
+    @offset_y.setter
+    def offset_y(self, val):
+        self._offset_y = val
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if self._offset_y != 0:
+            painter.translate(0, self._offset_y)
+        super().paintEvent(event)
 
     def _upd(self, _mode=None):
         checked = self._radio.isChecked()
@@ -1031,6 +1168,268 @@ class RadioRow(QWidget):
 
     def isChecked(self) -> bool:
         return self._radio.isChecked()
+
+# ── CUSTOM PATH CARD ──────────────────────────────────────────────────────────
+
+class CustomPathCard(QWidget):
+    path_selected = pyqtSignal(str)
+
+    def __init__(self, title: str, parent=None):
+        super().__init__(parent)
+        self._state = "normal"
+        self.setFixedHeight(70)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setObjectName("CustomPathCard")
+
+        # Animação de lift
+        self._offset_y = 0
+        self._lift_anim = QPropertyAnimation(self, b"offset_y")
+        self._lift_anim.setDuration(150)
+        self._lift_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+
+        # Esquerda: Texto e Input
+        txt_w = QWidget()
+        txt_w.setObjectName("cpc_txt")
+        txt = QVBoxLayout(txt_w)
+        txt.setSpacing(4)
+        txt.setContentsMargins(20, 8, 0, 8)
+
+        self._title_lbl = QLabel(title)
+        self._title_lbl.setObjectName("cpc_title")
+        self._title_lbl.setFont(QFont(FONT_MONO, 12, QFont.Weight.Bold))
+
+        self._input = QLineEdit()
+        self._input.setPlaceholderText("Clique para selecionar a pasta...")
+        self._input.setReadOnly(True)
+        self._input.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._input.setObjectName("cpc_input")
+        self._input.setStyleSheet(f"""
+            QLineEdit#cpc_input {{
+                background: transparent;
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                padding: 2px 8px;
+                color: {COLORS['text_mid']};
+                font-size: 11px;
+            }}
+        """)
+
+        txt.addWidget(self._title_lbl)
+        txt.addWidget(self._input)
+
+        # Direita: Radio e Botão Pasta
+        right_w = QWidget()
+        right_w.setObjectName("cpc_right")
+        r_lay = QHBoxLayout(right_w)
+        r_lay.setContentsMargins(8, 0, 16, 0)
+        r_lay.setSpacing(12)
+
+        self._radio = QRadioButton()
+        self._radio.setFixedWidth(20)
+        self._radio.toggled.connect(self._upd)
+
+        self._btn_folder = QPushButton()
+        self._btn_folder.setFixedSize(36, 36)
+        self._btn_folder.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_folder.setToolTip("Selecionar pasta")
+        self._apply_folder_icon()
+
+        r_lay.addWidget(self._radio)
+        r_lay.addWidget(self._btn_folder)
+
+        lay.addWidget(txt_w, 1)
+        lay.addWidget(right_w)
+
+        self._upd()
+        theme_manager.theme_changed.connect(self._upd)
+        theme_manager.theme_changed.connect(self._apply_folder_icon)
+
+    def _apply_folder_icon(self):
+        svg = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+              stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+        </svg>"""
+        renderer = QSvgRenderer(QByteArray(svg))
+        pixmap = QPixmap(24, 24)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        renderer.render(painter, QRectF(0, 0, 24, 24))
+        painter.end()
+        self._btn_folder.setIcon(QIcon(pixmap))
+        self._btn_folder.setStyleSheet(f"""
+            QPushButton {{
+                background: {COLORS['accent']};
+                border: none;
+                border-radius: 6px;
+            }}
+            QPushButton:hover {{ background: {COLORS['accent_hover']}; }}
+        """)
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self._radio.setChecked(True)
+            if self._input.geometry().contains(e.pos() - self.layout().itemAt(0).widget().pos()):
+                # Se clicou na área do input, abre o diálogo (será tratado no PageTerminal via sinal ou callback)
+                pass
+
+    def enterEvent(self, e):
+        self._state = "hover"
+        self._upd()
+        self._lift_anim.stop()
+        self._lift_anim.setEndValue(-2)
+        self._lift_anim.start()
+
+    def leaveEvent(self, e):
+        self._state = "normal"
+        self._upd()
+        self._lift_anim.stop()
+        self._lift_anim.setEndValue(0)
+        self._lift_anim.start()
+
+    @pyqtProperty(int)
+    def offset_y(self): return self._offset_y
+    @offset_y.setter
+    def offset_y(self, val):
+        self._offset_y = val
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if self._offset_y != 0:
+            painter.translate(0, self._offset_y)
+        super().paintEvent(event)
+
+    def _upd(self, _mode=None):
+        checked = self._radio.isChecked()
+        bg, border = card_style(self._state, checked)
+        self.setStyleSheet(f"""
+            QWidget#CustomPathCard {{
+                background: {bg};
+                border: 1.5px solid {border};
+                border-radius: 8px;
+            }}
+            QWidget#cpc_txt, QWidget#cpc_right {{ background: transparent; border: none; }}
+            QLabel#cpc_title {{ color: {COLORS['text']}; background: transparent; }}
+            QRadioButton::indicator {{
+                width: 16px; height: 16px;
+                border-radius: 8px;
+                border: 2px solid {COLORS['border']};
+            }}
+            QRadioButton::indicator:checked {{
+                border: 2px solid {COLORS['accent']};
+                background: {COLORS['accent']};
+            }}
+        """)
+
+    def set_path(self, path: str):
+        self._input.setText(path)
+
+    def path(self) -> str:
+        return self._input.text()
+
+    def radio(self) -> QRadioButton: return self._radio
+    def btn_folder(self) -> QPushButton: return self._btn_folder
+    def input_field(self) -> QLineEdit: return self._input
+
+# ── PROCESS CARD ─────────────────────────────────────────────────────────────
+
+class ProcessCard(QWidget):
+    def __init__(self, pid: str, name: str, exe_path: str, parent=None):
+        super().__init__(parent)
+        self._state = "normal"
+        self.setFixedHeight(58)
+        self.setCursor(Qt.CursorShape.ArrowCursor) # Não é clicável por padrão, mas tem hover visual
+        self.setObjectName("ProcessCard")
+
+        # Animação de lift (pos)
+        self._offset_y = 0
+        self._lift_anim = QPropertyAnimation(self, b"offset_y")
+        self._lift_anim.setDuration(150)
+        self._lift_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(16, 0, 16, 0)
+        lay.setSpacing(12)
+
+        dot = QWidget()
+        dot.setFixedSize(8, 8)
+        dot.setStyleSheet(f"background: {COLORS['warn']}; border-radius: 4px; border: none;")
+
+        pid_lbl = QLabel(f"PID {pid}")
+        pid_lbl.setFont(QFont(FONT_MONO, 10))
+        pid_lbl.setStyleSheet(f"color: {COLORS['text_dim']}; background: transparent;")
+        pid_lbl.setFixedWidth(72)
+
+        info_lay = QVBoxLayout()
+        info_lay.setSpacing(1)
+        info_lay.setContentsMargins(0, 0, 0, 0)
+        
+        name_lbl = QLabel(name)
+        name_lbl.setFont(QFont(FONT_SANS, 12, QFont.Weight.Bold))
+        name_lbl.setStyleSheet(f"color: {COLORS['text']}; background: transparent;")
+        
+        path_lbl = QLabel(exe_path)
+        path_lbl.setFont(QFont(FONT_MONO, 9))
+        path_lbl.setStyleSheet(f"color: {COLORS['text_dim']}; background: transparent;")
+        
+        info_lay.addStretch()
+        info_lay.addWidget(name_lbl)
+        info_lay.addWidget(path_lbl)
+        info_lay.addStretch()
+
+        info_w = QWidget()
+        info_w.setLayout(info_lay)
+        info_w.setStyleSheet("background: transparent;")
+
+        lay.addWidget(dot)
+        lay.addWidget(pid_lbl)
+        lay.addWidget(info_w, 1)
+
+        self._upd()
+        theme_manager.theme_changed.connect(self._upd)
+
+    @pyqtProperty(int)
+    def offset_y(self): return self._offset_y
+    @offset_y.setter
+    def offset_y(self, val):
+        self._offset_y = val
+        self.update()
+
+    def enterEvent(self, e):
+        self._state = "hover"
+        self._upd()
+        self._lift_anim.stop()
+        self._lift_anim.setEndValue(-2)
+        self._lift_anim.start()
+
+    def leaveEvent(self, e):
+        self._state = "normal"
+        self._upd()
+        self._lift_anim.stop()
+        self._lift_anim.setEndValue(0)
+        self._lift_anim.start()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if self._offset_y != 0:
+            painter.translate(0, self._offset_y)
+        super().paintEvent(event)
+
+    def _upd(self, _mode=None):
+        bg, border = card_style(self._state, False)
+        self.setStyleSheet(f"""
+            QWidget#ProcessCard {{
+                background: {bg};
+                border: 1.5px solid {border};
+                border-radius: 8px;
+            }}
+        """)
 
 
 # ── CONFIRM DIALOG ────────────────────────────────────────────────────────────
