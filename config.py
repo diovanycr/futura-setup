@@ -73,6 +73,12 @@ FIREBIRD_CONF_PATHS = [
 FIREBIRD_SERVICES = [
     "FirebirdServerDefaultInstance",
     "FirebirdGuardianDefaultInstance",
+    "Firebird Server - DefaultInstance",
+    "Firebird Guardian - DefaultInstance",
+    "FirebirdServerFirebird_4_0",
+    "FirebirdGuardianFirebird_4_0",
+    "FirebirdServerFirebird_5_0",
+    "FirebirdGuardianFirebird_5_0",
 ]
 
 # ── REDE ──────────────────────────────────────────────────────────────────────

@@ -260,7 +260,7 @@ def criar_pesquisa_ini(pasta_instalacao: str,
     """
     try:
         if not pasta_firebird:
-            pasta_firebird = find_firebird_dir() or r"C:\Program Files\Firebird\Firebird_3_0"
+            pasta_firebird = find_firebird_dir() or r"C:\Program Files\Firebird\Firebird_4_0"
 
         pasta_backup = Path(pasta_instalacao) / "backup"
         pasta_backup.mkdir(parents=True, exist_ok=True)

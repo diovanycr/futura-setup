@@ -354,7 +354,7 @@ class _StepConfig(QWidget):
 
         self._fld_firebird = _PathField(
             "Diretorio do Firebird (onde fica o gbak.exe)",
-            r"Ex: C:\Program Files (x86)\Firebird\Firebird_3_0",
+            r"Ex: C:\Program Files\Firebird\Firebird_4_0",
             is_dir=True,
         )
         lay.addWidget(self._fld_firebird)

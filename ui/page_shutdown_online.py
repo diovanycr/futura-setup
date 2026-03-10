@@ -30,8 +30,12 @@ from core.logger import log
 # ---------------------------------------------------------------------------
 
 _GFIX_CANDIDATES = [
+    r"C:\Program Files\Firebird\Firebird_5_0\gfix.exe",
+    r"C:\Program Files\Firebird\Firebird_4_0\gfix.exe",
     r"C:\Program Files\Firebird\Firebird_3_0\gfix.exe",
     r"C:\Program Files\Firebird\Firebird_2_5\gfix.exe",
+    r"C:\Program Files (x86)\Firebird\Firebird_5_0\gfix.exe",
+    r"C:\Program Files (x86)\Firebird\Firebird_4_0\gfix.exe",
     r"C:\Program Files (x86)\Firebird\Firebird_3_0\gfix.exe",
     r"C:\Program Files (x86)\Firebird\Firebird_2_5\gfix.exe",
     r"C:\Firebird\gfix.exe",

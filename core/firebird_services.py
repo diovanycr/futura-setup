@@ -31,20 +31,32 @@ FIREBIRD_SERVICES: list[str] = [
     "FirebirdGuardianDefaultInstance",
     "Firebird Server - DefaultInstance",
     "Firebird Guardian - DefaultInstance",
+    "FirebirdServerFirebird_4_0",
+    "FirebirdGuardianFirebird_4_0",
+    "FirebirdServerFirebird_5_0",
+    "FirebirdGuardianFirebird_5_0",
 ]
 
 FIREBIRD_CONF_PATHS: list[str] = [
-    r"C:\Program Files (x86)\Firebird\Firebird_3_0\firebird.conf",
+    r"C:\Program Files\Firebird\Firebird_5_0\firebird.conf",
+    r"C:\Program Files (x86)\Firebird\Firebird_5_0\firebird.conf",
+    r"C:\Program Files\Firebird\Firebird_4_0\firebird.conf",
+    r"C:\Program Files (x86)\Firebird\Firebird_4_0\firebird.conf",
     r"C:\Program Files\Firebird\Firebird_3_0\firebird.conf",
-    r"C:\Program Files (x86)\Firebird\Firebird_2_5\firebird.conf",
+    r"C:\Program Files (x86)\Firebird\Firebird_3_0\firebird.conf",
     r"C:\Program Files\Firebird\Firebird_2_5\firebird.conf",
+    r"C:\Program Files (x86)\Firebird\Firebird_2_5\firebird.conf",
 ]
 
 FIREBIRD_PATHS: list[str] = [
-    r"C:\Program Files (x86)\Firebird\Firebird_3_0",
+    r"C:\Program Files\Firebird\Firebird_5_0",
+    r"C:\Program Files (x86)\Firebird\Firebird_5_0",
+    r"C:\Program Files\Firebird\Firebird_4_0",
+    r"C:\Program Files (x86)\Firebird\Firebird_4_0",
     r"C:\Program Files\Firebird\Firebird_3_0",
-    r"C:\Program Files (x86)\Firebird\Firebird_2_5",
+    r"C:\Program Files (x86)\Firebird\Firebird_3_0",
     r"C:\Program Files\Firebird\Firebird_2_5",
+    r"C:\Program Files (x86)\Firebird\Firebird_2_5",
 ]
 
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW

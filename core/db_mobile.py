@@ -288,6 +288,8 @@ def criar_conexao(
 # ---------------------------------------------------------------------------
 
 _ISQL_CANDIDATES = [
+    r"C:\Program Files\Firebird\Firebird_4_0\isql.exe",
+    r"C:\Program Files (x86)\Firebird\Firebird_4_0\isql.exe",
     r"C:\Program Files\Firebird\Firebird_3_0\isql.exe",
     r"C:\Program Files\Firebird\Firebird_2_5\isql.exe",
     r"C:\Program Files (x86)\Firebird\Firebird_3_0\isql.exe",
