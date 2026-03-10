@@ -224,8 +224,8 @@ class PageTerminal(QWidget):
             return
         espaco = espaco_livre_mb(self._pasta)
         aviso  = "  ⚠ Pouco espaço!" if espaco < 500 else ""
-        self._resumo_labels["Servidor"].setText(self._servidor.nome)
-        self._resumo_labels["Caminho"].setText(self._servidor.caminho)
+        self._resumo_labels["Servidor"].setText(self._servidor.hostname)
+        self._resumo_labels["Caminho"].setText(self._servidor.path)
         self._resumo_labels["Pasta"].setText(self._pasta)
         self._resumo_labels["Espaço Livre"].setText(f"{espaco:.1f} MB disponíveis{aviso}")
 
@@ -256,11 +256,11 @@ class PageTerminal(QWidget):
             self._step3_lay.addWidget(box)
             self._step3_lay.addWidget(spacer(h=16))
 
-            btn_proximo = _make_primary_btn("▶  PRÓXIMO", 180)
+            btn_proximo = make_primary_btn("▶  PRÓXIMO", 180)
             btn_proximo.clicked.connect(lambda: self._go_step(3))
-            btn_voltar = _make_secondary_btn("← VOLTAR", 120)
+            btn_voltar = make_secondary_btn("← VOLTAR", 120)
             btn_voltar.clicked.connect(lambda: self._go_step(1))
-            self._step3_lay.addWidget(_btn_row(btn_proximo, btn_voltar))
+            self._step3_lay.addWidget(btn_row(btn_proximo, btn_voltar))
         else:
             alert = AlertBox(
                 f"{len(self._processos)} processo(s) em execução na pasta de destino. "
@@ -351,26 +351,28 @@ class PageTerminal(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("background: transparent; border: none;")
-        scroll.setMaximumHeight(200)
-        scroll.setMinimumHeight(60)
+        scroll.setMaximumHeight(250)
+        scroll.setMinimumHeight(120)
 
         self._files_container = QWidget()
         self._files_container.setStyleSheet("background: transparent;")
         self._files_grid = QGridLayout(self._files_container)
         self._files_grid.setContentsMargins(0, 0, 4, 0)
-        self._files_grid.setHorizontalSpacing(6)
-        self._files_grid.setVerticalSpacing(6)
-        self._files_grid.setColumnStretch(0, 1)
-        self._files_grid.setColumnStretch(1, 1)
+        self._files_grid.setHorizontalSpacing(10)
+        self._files_grid.setVerticalSpacing(8)
         scroll.setWidget(self._files_container)
+        
         lay.addWidget(scroll)
-        lay.addWidget(spacer(h=16))
+        
+        # Stretch flexível para empurrar o destino dos atalhos para baixo conforme solicitado
+        # Mas sem forçar o encavalamento
+        lay.addStretch(1) 
 
         lay.addWidget(SectionHeader("Destino dos Atalhos"))
-        lay.addWidget(spacer(h=6))
+        lay.addWidget(spacer(h=10))
         self._dest_panel = DestPanel()
         lay.addWidget(self._dest_panel)
-        lay.addWidget(spacer(h=16))
+        lay.addWidget(spacer(h=15))
 
         btn_copiar = make_primary_btn("▶  COPIAR ARQUIVOS", 200)
         btn_copiar.clicked.connect(self._start_install)
@@ -378,7 +380,7 @@ class PageTerminal(QWidget):
         btn_voltar.clicked.connect(lambda: self._go_step(2))
         lay.addWidget(btn_row(btn_copiar, btn_voltar))
 
-        lay.addStretch()
+        # Removido stretch final para evitar compressão dos itens superiores
         return w
 
     def _get_arquivos_servidor(self) -> list[dict]:
@@ -409,14 +411,14 @@ class PageTerminal(QWidget):
 
         if not exes:
             self._files_grid.addWidget(
-                label("Nenhum arquivo encontrado.", COLORS["warn"], 11), 0, 0, 1, 2
+                label("Nenhum arquivo encontrado.", COLORS["warn"], 11), 0, 0, 1, 3
             )
             return
 
         for idx, exe in enumerate(exes):
             item = MiniFileItem(exe["nome"], formatar_tamanho(exe["tamanho"]))
             item.toggled.connect(self._update_counter)
-            self._files_grid.addWidget(item, *divmod(idx, 2))
+            self._files_grid.addWidget(item, *divmod(idx, 3))
             self._file_items.append(item)
             
         self._update_counter()
@@ -431,7 +433,7 @@ class PageTerminal(QWidget):
             
         visiveis = [i for i in self._file_items if self._search_text in i.name.lower()]
         for idx, item in enumerate(visiveis):
-            self._files_grid.addWidget(item, *divmod(idx, 2))
+            self._files_grid.addWidget(item, *divmod(idx, 3))
             item.show()
 
     def _update_counter(self):
@@ -524,13 +526,13 @@ class PageTerminal(QWidget):
 
         btns = [btn_menu]
         if sucesso:
-            btn_rel = _make_secondary_btn("💾  Salvar Relatório", 180)
+            btn_rel = make_secondary_btn("💾  SALVAR RELATÓRIO", 180)
             btn_rel.clicked.connect(lambda: self._exportar_relatorio(self._ultimo_relatorio))
             btns.append(btn_rel)
 
         self._done_lay.addWidget(ResultBox(titulo, rows, kind))
         self._done_lay.addWidget(spacer(h=8))
-        self._done_lay.addWidget(_btn_row(*btns))
+        self._done_lay.addWidget(btn_row(*btns))
         self._done_lay.addStretch()
 
     def _exportar_relatorio(self, dados: dict):

@@ -213,7 +213,7 @@ class PageAtalhos(QWidget):
     def _update_resumo(self):
         selecionados = sum(1 for i in self._file_items if i.is_checked())
         self._resumo_labels["Servidor"].setText(
-            self._servidor.nome if self._servidor else "—"
+            self._servidor.hostname if self._servidor else "—"
         )
         self._resumo_labels["Selecionados"].setText(f"{selecionados} aplicativo(s)")
 
@@ -274,31 +274,27 @@ class PageAtalhos(QWidget):
             "campos":   rows,
         }
 
-        # ── Botões com estilo correto (padrão das outras telas) ──
+        # ── Botões ──
         btn_menu = make_primary_btn("← MENU PRINCIPAL", 200)
         btn_menu.clicked.connect(self.go_menu.emit)
-
-        btns = QHBoxLayout()
-        btns.setSpacing(10)
-        btns.addWidget(btn_menu)
 
         if sucesso:
             btn_relatorio = make_secondary_btn("💾  Salvar Relatório", 180)
             btn_relatorio.clicked.connect(
                 lambda: self._exportar_relatorio(self._ultimo_relatorio)
             )
-            btns.addWidget(btn_relatorio)
+        else:
+            btn_relatorio = None
 
-        if not sucesso:
+        if not sucesso and not cancelado:
             btn_retry = make_primary_btn("↺  TENTAR NOVAMENTE", 200)
             btn_retry.clicked.connect(lambda: self._go_step(0))
-            btns.addWidget(btn_retry)
-
-        lay.addWidget(btn_row(btn_menu, *([btn_relatorio] if sucesso else []), *([btn_retry] if not sucesso else [])))
+        else:
+            btn_retry = None
 
         self._done_lay.addWidget(ResultBox(titulo, rows, kind))
         self._done_lay.addWidget(spacer(h=8))
-        self._done_lay.addWidget(btn_w)
+        self._done_lay.addWidget(btn_row(btn_menu, *([btn_relatorio] if btn_relatorio else []), *([btn_retry] if btn_retry else [])))
         self._done_lay.addStretch()
 
     def _exportar_relatorio(self, dados: dict):

@@ -21,7 +21,10 @@ from PyQt6.QtWidgets import (
 
 from ui.theme import COLORS, FONT_SANS, FONT_MONO
 from ui.theme_manager import theme_manager
-from ui.widgets import PageTitle, SectionHeader, AlertBox, make_primary_btn, make_secondary_btn, btn_row, spacer, label, h_line
+from ui.widgets import (
+    PageTitle, SectionHeader, AlertBox, make_primary_btn, 
+    make_secondary_btn, make_folder_btn, btn_row, spacer, label, h_line
+)
 from core.logger import log
 
 
@@ -130,15 +133,9 @@ class _PathFieldDB(QWidget):
         self._edit.setPlaceholderText(r"Ex: C:\Futura\Dados\DADOS.fdb")
         self._edit.setMinimumHeight(28)
         self._edit.setFont(QFont(FONT_MONO, 10))
-        self._btn = QPushButton()
-        self._btn.setIcon(
-            QApplication.style().standardIcon(
-                QApplication.style().StandardPixmap.SP_DirOpenIcon
-            )
-        )
+        self._edit.setFont(QFont(FONT_MONO, 10))
+        self._btn = make_folder_btn(self)
         self._btn.setFixedSize(28, 28)
-        self._btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._btn.setToolTip("Selecionar arquivo .fdb")
         self._btn.clicked.connect(self._browse)
         row = QHBoxLayout()
         row.setSpacing(4)

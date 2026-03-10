@@ -23,7 +23,8 @@ from PyQt6.QtWidgets import (
     QWidget, QLabel, QHBoxLayout, QVBoxLayout,
     QPushButton, QFrame, QProgressBar, QTextEdit,
     QSizePolicy, QRadioButton, QDialog, QStackedWidget,
-    QGridLayout, QScrollArea, QFileDialog, QLineEdit
+    QGridLayout, QScrollArea, QFileDialog, QLineEdit,
+    QApplication
 )
 from PyQt6.QtCore import Qt, pyqtSignal, pyqtProperty, QPropertyAnimation, QEasingCurve, QByteArray, QRectF
 from PyQt6.QtGui import QFont, QPainter, QColor, QBrush, QPen, QIcon, QPixmap
@@ -148,6 +149,21 @@ def make_secondary_btn(text: str, min_width: int = 120) -> QPushButton:
     btn.setFont(QFont(FONT_SANS, 10))
     _apply_secondary_style(btn)
     theme_manager.theme_changed.connect(lambda _: _apply_secondary_style(btn))
+    return btn
+
+
+def make_folder_btn(parent=None) -> QPushButton:
+    """Cria um botão de seleção de pasta padronizado."""
+    btn = make_secondary_btn("", 40)
+    btn.setIcon(
+        QApplication.style().standardIcon(
+            QApplication.style().StandardPixmap.SP_DirOpenIcon
+        )
+    )
+    btn.setMaximumWidth(40)
+    btn.setMinimumHeight(28)
+    btn.setCursor(Qt.CursorShape.PointingHandCursor)
+    btn.setToolTip("Selecionar pasta")
     return btn
 
 def btn_row(*btns, centered: bool = True) -> QWidget:
@@ -1232,11 +1248,8 @@ class CustomPathCard(QWidget):
         self._radio.setFixedWidth(20)
         self._radio.toggled.connect(self._upd)
 
-        self._btn_folder = QPushButton()
-        self._btn_folder.setFixedSize(36, 36)
-        self._btn_folder.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._btn_folder.setToolTip("Selecionar pasta")
-        self._apply_folder_icon()
+        self._btn_folder = make_folder_btn(self)
+        self._btn_folder.setFixedSize(40, 36) # Um pouco maior para o card
 
         r_lay.addWidget(self._radio)
         r_lay.addWidget(self._btn_folder)
@@ -1246,28 +1259,7 @@ class CustomPathCard(QWidget):
 
         self._upd()
         theme_manager.theme_changed.connect(self._upd)
-        theme_manager.theme_changed.connect(self._apply_folder_icon)
 
-    def _apply_folder_icon(self):
-        svg = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
-              stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-        </svg>"""
-        renderer = QSvgRenderer(QByteArray(svg))
-        pixmap = QPixmap(24, 24)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(pixmap)
-        renderer.render(painter, QRectF(0, 0, 24, 24))
-        painter.end()
-        self._btn_folder.setIcon(QIcon(pixmap))
-        self._btn_folder.setStyleSheet(f"""
-            QPushButton {{
-                background: {COLORS['accent']};
-                border: none;
-                border-radius: 6px;
-            }}
-            QPushButton:hover {{ background: {COLORS['accent_hover']}; }}
-        """)
 
     def mousePressEvent(self, e):
         if e.button() == Qt.MouseButton.LeftButton:

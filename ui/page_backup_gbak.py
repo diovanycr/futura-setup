@@ -26,7 +26,7 @@ from ui.theme_manager import theme_manager
 from ui.widgets import (
     PageTitle, SectionHeader, AlertBox, LogConsole,
     ProgressBlock, ResultBox, make_primary_btn, make_secondary_btn,
-    btn_row, spacer, h_line, label, ConfirmDialog,
+    make_folder_btn, btn_row, spacer, h_line, label, ConfirmDialog,
 )
 from core.logger import log
 from core.backup_gbak import (
@@ -199,12 +199,7 @@ class _PathField(QWidget):
         self._edit.setPlaceholderText(placeholder)
         self._edit.setMinimumHeight(28)
 
-        self._btn = make_secondary_btn("", 40)
-        self._btn.setIcon(
-            QApplication.style().standardIcon(
-                QApplication.style().StandardPixmap.SP_DirOpenIcon
-            )
-        )
+        self._btn = make_folder_btn(self)
         self._btn.setMaximumWidth(40)
         self._btn.setMinimumHeight(28)
         self._btn.clicked.connect(self._browse)
