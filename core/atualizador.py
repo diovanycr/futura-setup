@@ -256,7 +256,8 @@ def criar_pesquisa_ini(pasta_instalacao: str,
                        caminho_banco: str) -> bool:
     """
     Cria ou atualiza PESQUISA.INI com as configurações de atualização.
-    Usa configparser (stdlib) em vez de parsing manual com regex.
+    Usa manipulação de texto direta para garantir compatibilidade com TIniFile do Delphi 
+    (sem espaços ao redor do '=').
     """
     try:
         if not pasta_firebird:
@@ -273,27 +274,58 @@ def criar_pesquisa_ini(pasta_instalacao: str,
             "BASE_PATH":      caminho_banco,
         }
 
-        arquivo = Path(pasta_instalacao) / "PESQUISA.INI"
+        # Extrai a lógica de escrita para uma função interna para reutilizar
+        def _escrever_ini(caminho_arquivo: Path):
+            linhas = []
+            if caminho_arquivo.exists():
+                shutil.copy2(str(caminho_arquivo), str(caminho_arquivo) + ".bak")
+                with open(caminho_arquivo, "r", encoding="cp1252", errors="ignore") as f:
+                    linhas = f.read().splitlines()
 
-        cfg = configparser.ConfigParser()
-        cfg.optionxform = str   # preserva maiúsculas/minúsculas das chaves
+            secao = "[ATUALIZADO_AUTOMATICO]"
+            idx_secao: int = -1
+            
+            for i, linha in enumerate(linhas):
+                if linha.strip().upper() == secao:
+                    idx_secao = i
+                    break
+                    
+            if idx_secao == -1:
+                linhas.append("")
+                linhas.append(secao)
+                idx_secao = len(linhas) - 1
 
-        if arquivo.exists():
-            # Faz backup antes de modificar
-            shutil.copy2(str(arquivo), str(arquivo) + ".bak")
-            cfg.read(str(arquivo), encoding="cp1252")
+            chaves_alvo = list(valores.keys())
+            i = int(idx_secao) + 1
+            while i < len(linhas):
+                linha = linhas[i].strip()
+                if linha.startswith("[") and linha.endswith("]"):
+                    break 
+                
+                if "=" in linha:
+                    k = linha.split("=", 1)[0].strip()
+                    if k.upper() in chaves_alvo:
+                        linhas.pop(i)
+                        continue
+                i += 1
 
-        secao = "ATUALIZADO_AUTOMATICO"
-        if not cfg.has_section(secao):
-            cfg.add_section(secao)
+            for k, v in reversed(list(valores.items())):
+                linhas.insert(int(idx_secao) + 1, f"{k}={v}")
 
-        for k, v in valores.items():
-            cfg.set(secao, k, v)
+            with open(caminho_arquivo, "w", encoding="cp1252") as f:
+                f.write("\n".join(linhas) + "\n")
 
-        with open(arquivo, "w", encoding="cp1252") as f:
-            cfg.write(f)
+        # 1. Escreve na pasta principal selecionada
+        arquivo_principal = Path(pasta_instalacao) / "PESQUISA.INI"
+        _escrever_ini(arquivo_principal)
+        log.ok(f"PESQUISA.INI gravado: {arquivo_principal}")
 
-        log.ok(f"PESQUISA.INI gravado: {arquivo}")
+        # 2. Escreve também em C:\FUTURA caso exista e seja diferente da pasta selecionada
+        pasta_padrao = Path("C:\\FUTURA")
+        if pasta_padrao.exists() and pasta_padrao.resolve() != Path(pasta_instalacao).resolve():
+            arquivo_padrao = pasta_padrao / "PESQUISA.INI"
+            _escrever_ini(arquivo_padrao)
+            log.ok(f"PESQUISA.INI gravado (fallback): {arquivo_padrao}")
         return True
 
     except Exception as e:

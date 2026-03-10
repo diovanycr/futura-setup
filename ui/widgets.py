@@ -97,7 +97,7 @@ def _apply_btn_base(btn: QPushButton, min_width: int):
     btn.setMinimumHeight(40)
     btn.setCursor(Qt.CursorShape.PointingHandCursor)
 
-def _apply_primary_style(btn: QPushButton):
+def _apply_primary_style(btn: QPushButton, font_size: int = 11, padding: str = "4px 12px"):
     text_color = "#ffffff" if theme_manager.mode == "light" else "#001826"
     btn.setStyleSheet(f"""
         QPushButton {{
@@ -105,9 +105,9 @@ def _apply_primary_style(btn: QPushButton):
             color: {text_color};
             border: none;
             border-radius: 8px;
-            padding: 8px 24px;
+            padding: {padding};
             font-weight: 700;
-            font-size: 13px;
+            font-size: {font_size}px;
         }}
         QPushButton:hover {{ background-color: {COLORS["accent_hover"]}; }}
         QPushButton:pressed {{ background-color: {COLORS["accent_press"]}; }}
@@ -117,15 +117,15 @@ def _apply_primary_style(btn: QPushButton):
         }}
     """)
 
-def _apply_secondary_style(btn: QPushButton):
+def _apply_secondary_style(btn: QPushButton, font_size: int = 11, padding: str = "4px 12px"):
     btn.setStyleSheet(f"""
         QPushButton {{
             background-color: transparent;
             color: {COLORS["text"]};
             border: 1.5px solid {COLORS["btn_border"]};
             border-radius: 8px;
-            padding: 8px 24px;
-            font-size: 13px;
+            padding: {padding};
+            font-size: {font_size}px;
             font-weight: 500;
         }}
         QPushButton:hover {{
@@ -135,20 +135,20 @@ def _apply_secondary_style(btn: QPushButton):
         QPushButton:pressed {{ background-color: {COLORS["panel_press"]}; }}
     """)
 
-def make_primary_btn(text: str, min_width: int = 180) -> QPushButton:
+def make_primary_btn(text: str, min_width: int = 140, font_size: int = 11, padding: str = "4px 12px") -> QPushButton:
     btn = QPushButton(text)
     _apply_btn_base(btn, min_width)
-    btn.setFont(QFont(FONT_SANS, 10, QFont.Weight.Bold))
-    _apply_primary_style(btn)
-    theme_manager.theme_changed.connect(lambda _: _apply_primary_style(btn))
+    btn.setFont(QFont(FONT_SANS, font_size, QFont.Weight.Bold))
+    _apply_primary_style(btn, font_size, padding)
+    theme_manager.theme_changed.connect(lambda _: _apply_primary_style(btn, font_size, padding))
     return btn
 
-def make_secondary_btn(text: str, min_width: int = 120) -> QPushButton:
+def make_secondary_btn(text: str, min_width: int = 100, font_size: int = 11, padding: str = "4px 12px") -> QPushButton:
     btn = QPushButton(text)
     _apply_btn_base(btn, min_width)
-    btn.setFont(QFont(FONT_SANS, 10))
-    _apply_secondary_style(btn)
-    theme_manager.theme_changed.connect(lambda _: _apply_secondary_style(btn))
+    btn.setFont(QFont(FONT_SANS, font_size))
+    _apply_secondary_style(btn, font_size, padding)
+    theme_manager.theme_changed.connect(lambda _: _apply_secondary_style(btn, font_size, padding))
     return btn
 
 
@@ -1228,7 +1228,7 @@ class CustomPathCard(QWidget):
                 background: transparent;
                 border: 1px solid {COLORS['border']};
                 border-radius: 4px;
-                padding: 2px 8px;
+                padding: 4px 12px;
                 color: {COLORS['text_mid']};
                 font-size: 11px;
             }}

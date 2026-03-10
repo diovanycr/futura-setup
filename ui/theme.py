@@ -160,7 +160,8 @@ QLineEdit {{
     border: 1px solid {C['border']};
     color: {C['text']};
     font-family: 'Consolas';
-    padding: 7px 12px;
+    padding: 4px 12px;
+    font-size: 11px;
     border-radius: 4px;
 }}
 QLineEdit:hover {{ border-color: {C['text_dim']}; }}

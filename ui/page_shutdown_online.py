@@ -157,8 +157,8 @@ class _PathFieldDB(QWidget):
                 color: {COLORS['text']};
                 border: 1.5px solid {COLORS['border']};
                 border-radius: 5px;
-                padding: 3px 8px;
-                font-size: 10px;
+                padding: 4px 12px;
+                font-size: 11px;
             }}
             QLineEdit:focus {{ border-color: {COLORS['accent']}; }}
         """)

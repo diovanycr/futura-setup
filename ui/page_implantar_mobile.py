@@ -38,7 +38,7 @@ from core.db_mobile import (
 )
 
 _DEFAULT_HOST     = "localhost"
-_DEFAULT_DATABASE = r"C:\Futura_atualizar\Dados\gourmet-2025.5.fdb"
+_DEFAULT_DATABASE = ""
 _DEFAULT_USER     = "sysdba"
 _DEFAULT_PASSWORD = "sbofutura"
 
@@ -94,8 +94,8 @@ class _PathFieldDB(QWidget):
                 color: {COLORS['text']};
                 border: 1.5px solid {COLORS['border']};
                 border-radius: 5px;
-                padding: 3px 8px;
-                font-size: 10px;
+                padding: 4px 12px;
+                font-size: 11px;
             }}
             QLineEdit:focus {{ border-color: {COLORS['accent']}; }}
         """)
@@ -332,15 +332,30 @@ class _StepFormulario(QWidget):
 
         lay.addWidget(SectionHeader("Conexão com o Banco"))
 
+        # Campo .fdb com explorer + Botao de testar conexao na mesma linha
+        db_row = QHBoxLayout()
+        db_row.setSpacing(6)
+
         self._fld_db = _PathFieldDB()
         self._fld_db.value = _DEFAULT_DATABASE
-        lay.addWidget(self._fld_db)
+        db_row.addWidget(self._fld_db, 1)
 
-        # Botao testar conexao
-        self._btn_testar = make_primary_btn("TESTAR CONEXÃO", 160)
+        # Botao testar conexao nivelado
+        btn_testar_wrap = QWidget()
+        btn_testar_wrap.setStyleSheet("background: transparent;")
+        btn_testar_wrap_lay = QVBoxLayout(btn_testar_wrap)
+        btn_testar_wrap_lay.setContentsMargins(0, 0, 0, 0)
+        btn_testar_wrap_lay.setSpacing(3)
+        btn_testar_wrap_lay.addWidget(QLabel("")) # Spacer para nivelar
+        self._btn_testar = make_secondary_btn("TESTAR", 80)
         self._btn_testar.clicked.connect(self._on_testar)
         self._btn_testar.setEnabled(FDB_DISPONIVEL)
-        lay.addWidget(btn_row(self._btn_testar))
+        btn_testar_wrap_lay.addWidget(self._btn_testar)
+
+        db_row.addWidget(btn_testar_wrap)
+        lay.addLayout(db_row)
+
+        lay.addWidget(spacer(h=4))
 
         # Resumo dos scripts que serao rodados
         lay.addWidget(SectionHeader("Scripts que serão executados"))
@@ -387,7 +402,7 @@ class _StepFormulario(QWidget):
         self._worker_teste.sucesso.connect(self._on_teste_ok)
         self._worker_teste.erro.connect(self._on_teste_erro)
         self._worker_teste.finished.connect(
-            lambda: self._btn_testar.setText("TESTAR CONEXÃO")
+            lambda: self._btn_testar.setText("TESTAR")
         )
         self._worker_teste.start()
 

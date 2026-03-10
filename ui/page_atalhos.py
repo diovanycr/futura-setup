@@ -107,7 +107,8 @@ class PageAtalhos(QWidget):
                 background: {COLORS['surface']};
                 border: 1px solid {COLORS['border']};
                 border-radius: 6px;
-                padding: 0 12px;
+                padding: 4px 12px;
+                font-size: 11px;
                 color: {COLORS['text']};
             }}
             QLineEdit:focus {{

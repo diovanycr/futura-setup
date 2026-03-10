@@ -194,9 +194,9 @@ class PageDiagnostico(QWidget):
                 background: {COLORS['surface']};
                 border: 1.5px solid {COLORS['border']};
                 border-radius: 6px;
-                padding: 0 12px;
+                padding: 4px 12px;
                 color: {COLORS['text']};
-                font-size: 12px;
+                font-size: 11px;
             }}
             QLineEdit#campo_alvo:focus {{
                 border-color: {COLORS['accent']};

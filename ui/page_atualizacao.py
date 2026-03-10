@@ -195,7 +195,7 @@ class PageAtualizacao(QWidget):
         lay.setContentsMargins(40, 36, 40, 36)
         lay.setSpacing(0)
 
-        lay.addWidget(PageTitle("MODO 03", "Atualização Completa do Sistema"))
+        lay.addWidget(PageTitle("ATUALIZAR", "Atualização Completa do Sistema"))
 
         self._step_ind = StepIndicator(STEP_NAMES)
         lay.addWidget(self._step_ind)
