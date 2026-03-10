@@ -22,10 +22,10 @@ import html
 from PyQt6.QtWidgets import (
     QWidget, QLabel, QHBoxLayout, QVBoxLayout,
     QPushButton, QFrame, QProgressBar, QTextEdit,
-    QSizePolicy, QRadioButton, QDialog
+    QSizePolicy, QRadioButton, QDialog, QStackedWidget
 )
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont
+from PyQt6.QtCore import Qt, pyqtSignal, pyqtProperty, QPropertyAnimation, QEasingCurve
+from PyQt6.QtGui import QFont, QPainter, QColor, QBrush, QPen
 
 from ui.theme import COLORS, FONT_MONO, FONT_SANS
 from ui.theme_manager import theme_manager
@@ -418,6 +418,35 @@ class LogConsole(QTextEdit):
         self.clear()
 
 
+# ── FADE STACKED WIDGET ───────────────────────────────────────────────────────
+
+class FadeStackedWidget(QStackedWidget):
+    """
+    Substituto para QStackedWidget com transição suave (fade).
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._opacity_anim = QPropertyAnimation(self, b"windowOpacity")
+        self._opacity_anim.setDuration(250)
+        self._opacity_anim.setStartValue(0.0)
+        self._opacity_anim.setEndValue(1.0)
+        self._opacity_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+    def setCurrentIndex(self, index):
+        if index == self.currentIndex():
+            return
+        # Para um fade simples, apenas reiniciamos a opacidade do widget inteiro
+        # (Nota: Funciona melhor se os widgets filhos forem opacos ou tiverem fundo próprio)
+        super().setCurrentIndex(index)
+        self._opacity_anim.stop()
+        self._opacity_anim.start()
+
+    def setCurrentWidget(self, widget):
+        idx = self.indexOf(widget)
+        if idx >= 0:
+            self.setCurrentIndex(idx)
+
+
 # ── SERVER ITEM ───────────────────────────────────────────────────────────────
 
 class ServerItem(QWidget):
@@ -435,6 +464,12 @@ class ServerItem(QWidget):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedHeight(60)
         self.setObjectName("ServerItem")
+
+        # Animação de lift (pos)
+        self._offset_y = 0
+        self._lift_anim = QPropertyAnimation(self, b"offset_y")
+        self._lift_anim.setDuration(150)
+        self._lift_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
 
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 16, 0)
@@ -484,6 +519,17 @@ class ServerItem(QWidget):
         self._upd()
         theme_manager.theme_changed.connect(self._upd)
 
+    @pyqtProperty(int)
+    def offset_y(self):
+        return self._offset_y
+
+    @offset_y.setter
+    def offset_y(self, v):
+        self._offset_y = v
+        # Ajusta a margem do layout para simular o "pulo"
+        self.layout().setContentsMargins(0, v, 16, -v)
+        self.update()
+
     def _upd(self, _mode: str = ""):
         bg, border = card_style(self._state, self._selected)
         name_c = COLORS["accent"] if self._selected else COLORS["text"]
@@ -510,10 +556,16 @@ class ServerItem(QWidget):
     def enterEvent(self, e):
         self._state = "hover"
         self._upd()
+        self._lift_anim.stop()
+        self._lift_anim.setEndValue(-3)
+        self._lift_anim.start()
 
     def leaveEvent(self, e):
         self._state = "normal"
         self._upd()
+        self._lift_anim.stop()
+        self._lift_anim.setEndValue(0)
+        self._lift_anim.start()
 
     def mousePressEvent(self, e):
         if e.button() == Qt.MouseButton.LeftButton:
@@ -642,23 +694,32 @@ class MiniCheckbox(QWidget):
 # ── MINI FILE ITEM ────────────────────────────────────────────────────────────
 
 class MiniFileItem(QWidget):
+    toggled = pyqtSignal(bool)
+
     def __init__(self, name: str, size_str: str = "", parent=None):
         super().__init__(parent)
         self.name     = name
         self._checked = False
-        self.setFixedHeight(28)
+        self._state    = "normal"
+        self.setFixedHeight(34)
         self.setObjectName("MiniFileItem")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
+        # Animação de lift (pos)
+        self._offset_y = 0
+        self._lift_anim = QPropertyAnimation(self, b"offset_y")
+        self._lift_anim.setDuration(150)
+        self._lift_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(8, 0, 10, 0)
-        lay.setSpacing(7)
+        lay.setContentsMargins(10, 0, 10, 0)
+        lay.setSpacing(8)
 
         self._check = QLabel()
         self._check.setObjectName("mfi_check")
-        self._check.setFixedSize(14, 14)
+        self._check.setFixedSize(16, 16)
         self._check.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._check.setFont(QFont(FONT_SANS, 8, QFont.Weight.Bold))
+        self._check.setFont(QFont(FONT_SANS, 9, QFont.Weight.Bold))
 
         self._name_lbl = QLabel(name)
         self._name_lbl.setObjectName("mfi_name")
@@ -677,10 +738,24 @@ class MiniFileItem(QWidget):
         self._upd()
         theme_manager.theme_changed.connect(self._upd)
 
+    @pyqtProperty(int)
+    def offset_y(self): return self._offset_y
+    @offset_y.setter
+    def offset_y(self, val):
+        self._offset_y = val
+        self.move(self.x(), self.y() + val) # Ajuste manual se necessário, mas pos é melhor
+        # Se estiver em um layout, move() pode ser ignorado. 
+        # Para Grid/Box layouts, o ideal é usar renderização com offset no paintEvent ou margens.
+        # Vamos usar translação no paintEvent para ser mais robusto em layouts.
+        self.update()
+
     def _upd(self, _mode: str = ""):
         if self._checked:
             bg, border    = COLORS["accent_dim"], COLORS["accent"]
             chk_bg, chk_bd, chk_txt = COLORS["accent"], "none", "✓"
+        elif self._state == "hover":
+            bg, border    = COLORS["panel_hover"], COLORS["border"]
+            chk_bg, chk_bd, chk_txt = "transparent", f"1px solid {COLORS['text_dim']}", ""
         else:
             bg, border    = COLORS["surface"], COLORS["border"]
             chk_bg = "transparent"
@@ -689,27 +764,51 @@ class MiniFileItem(QWidget):
 
         self.setStyleSheet(f"""
             QWidget#MiniFileItem {{
-                background: {bg}; border: 1px solid {border}; border-radius: 4px;
+                background: {bg}; border: 1px solid {border}; border-radius: 6px;
             }}
             QLabel#mfi_check {{
                 background: {chk_bg}; color: #ffffff;
-                border-radius: 7px; border: {chk_bd}; font-size: 8px;
+                border-radius: 8px; border: {chk_bd}; font-size: 9px;
             }}
             QLabel#mfi_name {{ color: {COLORS['text']}; background: transparent; border: none; }}
             QLabel#mfi_size {{ color: {COLORS['text_dim']}; background: transparent; border: none; }}
         """)
         self._check.setText(chk_txt)
 
+    def enterEvent(self, e):
+        self._state = "hover"
+        self._upd()
+        self._lift_anim.stop()
+        self._lift_anim.setEndValue(-2)
+        self._lift_anim.start()
+
+    def leaveEvent(self, e):
+        self._state = "normal"
+        self._upd()
+        self._lift_anim.stop()
+        self._lift_anim.setEndValue(0)
+        self._lift_anim.start()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if self._offset_y != 0:
+            painter.translate(0, self._offset_y)
+        super().paintEvent(event)
+
     def toggle(self):
         self._checked = not self._checked
         self._upd()
+        self.toggled.emit(self._checked)
 
     def is_checked(self) -> bool:
         return self._checked
 
     def set_checked(self, v: bool):
-        self._checked = v
-        self._upd()
+        if self._checked != v:
+            self._checked = v
+            self._upd()
+            self.toggled.emit(v)
 
     def mousePressEvent(self, e):
         if e.button() == Qt.MouseButton.LeftButton:
@@ -1078,6 +1177,81 @@ class WorkerGuardDialog(QWidget):
             QLabel#gd_title {{ color: {COLORS['text']}; background: transparent; }}
             QLabel#gd_msg   {{ color: {COLORS['text_mid']}; background: transparent; }}
         """)
+
+
+# ── LOADING SPINNER ───────────────────────────────────────────────────────────
+
+class LoadingSpinner(QWidget):
+    """
+    Spinner circular moderno usando QPainter e animação suave.
+    Utiliza as cores do tema (accent).
+    """
+    def __init__(self, size: int = 40, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(size, size)
+        self._angle = 0
+        self._anim = QPropertyAnimation(self, b"angle")
+        self._anim.setDuration(1000)
+        self._anim.setStartValue(0)
+        self._anim.setEndValue(360)
+        self._anim.setLoopCount(-1)
+        self._anim.setEasingCurve(QEasingCurve.Type.Linear)
+
+        theme_manager.theme_changed.connect(lambda _: self.update())
+
+    @pyqtProperty(int)
+    def angle(self):
+        return self._angle
+
+    @angle.setter
+    def angle(self, v):
+        self._angle = v
+        self.update()
+
+    def start(self):
+        self._anim.start()
+        self.show()
+
+    def stop(self):
+        self._anim.stop()
+        self.hide()
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        rect = self.rect().adjusted(4, 4, -4, -4)
+        color = QColor(COLORS["accent"])
+
+        # Desenha o fundo (opcional, um círculo sutil)
+        bg_color = QColor(color)
+        bg_color.setAlpha(30)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(bg_color))
+        # p.drawEllipse(rect) # Se quiser um fundo circular sutil
+
+        # Desenha o arco giratório
+        pen = QPen(color)
+        pen.setWidth(3)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        p.setPen(pen)
+
+        # startAngle e spanAngle são em 1/16 de grau
+        # O arco gira conforme self._angle
+        start_angle = int(self._angle * 16)
+        span_angle  = 280 * 16 # Arco um pouco maior para um look mais "líquido"
+
+        p.drawArc(rect, -start_angle, span_angle)
+
+        # Adiciona um segundo arco mais fino para detalhe (opcional, mas premium)
+        pen.setWidth(1)
+        color_detail = QColor(color)
+        color_detail.setAlpha(100)
+        pen.setColor(color_detail)
+        p.setPen(pen)
+        p.drawArc(rect.adjusted(3, 3, -3, -3), int(start_angle * 1.5), span_angle)
+
+        p.end()
 
 
 # ── MENU CARD ─────────────────────────────────────────────────────────────────

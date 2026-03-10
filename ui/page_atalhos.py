@@ -1,5 +1,5 @@
 # =============================================================================
-# FUTURA SETUP — Página: Atalhos via Rede (MODO 01)
+# FUTURA SETUP — Página: Atalhos via Rede
 # Melhorias v2:
 #   - theme_manager importado no topo (sem import tardio dentro de _build_step2)
 #   - theme_changed conectado com self._refresh_resumo_style diretamente
@@ -15,7 +15,7 @@
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea,
-    QLabel, QGridLayout, QStackedWidget, QFileDialog, QSizePolicy,
+    QLabel, QGridLayout, QStackedWidget, QFileDialog, QSizePolicy, QLineEdit,
 )
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtGui import QFont
@@ -110,7 +110,9 @@ class PageAtalhos(QWidget):
         root.setContentsMargins(40, 36, 40, 36)
         root.setSpacing(0)
 
-        root.addWidget(PageTitle("MODO 01", "Puxar Atalhos via Rede"))
+        self._search_text = ""
+
+        root.addWidget(PageTitle("ATALHOS", "Puxar Atalhos via Rede"))
 
         self._step_ind = StepIndicator(STEP_NAMES)
         root.addWidget(self._step_ind)
@@ -143,14 +145,47 @@ class PageAtalhos(QWidget):
         hdr = QHBoxLayout()
         hdr.addWidget(SectionHeader("Aplicativos Disponíveis"))
         hdr.addStretch()
-        self._sel_all_btn = make_btn("☑  Selecionar Todos", min_width=150)
+        self._sel_all_btn = make_btn("☐  Selecionar Todos", min_width=130)
         self._sel_all_btn.clicked.connect(self._toggle_all)
         hdr.addWidget(self._sel_all_btn)
         hdr_w = QWidget()
         hdr_w.setLayout(hdr)
         hdr_w.setStyleSheet("background: transparent;")
         lay.addWidget(hdr_w)
-        lay.addWidget(spacer(h=4))
+        lay.addWidget(spacer(h=12))
+
+        # Search and Counter Row
+        search_lay = QHBoxLayout()
+        search_lay.setSpacing(12)
+        
+        self._search_input = QLineEdit()
+        self._search_input.setPlaceholderText("🔍  Buscar aplicativo...")
+        self._search_input.setMinimumHeight(32)
+        self._search_input.setStyleSheet(f"""
+            QLineEdit {{
+                background: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 6px;
+                padding: 0 12px;
+                color: {COLORS['text']};
+            }}
+            QLineEdit:focus {{
+                border-color: {COLORS['accent']};
+            }}
+        """)
+        self._search_input.textChanged.connect(self._on_search)
+        
+        self._counter_lbl = QLabel("0 selecionados")
+        self._counter_lbl.setFont(QFont(FONT_MONO, 10, QFont.Weight.Bold))
+        self._counter_lbl.setStyleSheet(f"color: {COLORS['accent']}; background: transparent;")
+        
+        search_lay.addWidget(self._search_input, 1)
+        search_lay.addWidget(self._counter_lbl)
+        
+        search_w = QWidget()
+        search_w.setLayout(search_lay)
+        lay.addWidget(search_w)
+        lay.addWidget(spacer(h=8))
 
         # Scroll expande para ocupar todo espaço disponível acima dos botões
         scroll = QScrollArea()
@@ -327,7 +362,7 @@ class PageAtalhos(QWidget):
         ]
 
         self._ultimo_relatorio = {
-            "modo":     "01 — Puxar via Rede",
+            "modo":     "Atalhos via Rede",
             "titulo":   titulo,
             "sucesso":  sucesso,
             "campos":   rows,
@@ -428,17 +463,47 @@ class PageAtalhos(QWidget):
 
         for idx, exe in enumerate(exes):
             item = MiniFileItem(exe["nome"])
-            item.set_checked(False)  # ← inicia desmarcado
+            item.set_checked(False)
+            item.toggled.connect(self._update_counter)
             self._files_grid.addWidget(item, *divmod(idx, 2))
             self._file_items.append(item)
+        
+        self._update_counter()
+
+    def _on_search(self, text: str):
+        self._search_text = text.lower()
+        self._refiltrar_grid()
+
+    def _refiltrar_grid(self):
+        # Remove todos do grid
+        for i in range(self._files_grid.count()):
+            self._files_grid.itemAt(i).widget().hide()
+        
+        # Filtra e readiciona
+        visiveis = [i for i in self._file_items if self._search_text in i.name.lower()]
+        
+        for idx, item in enumerate(visiveis):
+            self._files_grid.addWidget(item, *divmod(idx, 2))
+            item.show()
+
+    def _update_counter(self):
+        sel = sum(1 for i in self._file_items if i.is_checked())
+        self._counter_lbl.setText(f"{sel} selecionado(s)")
+        
+        # Se a lista estiver vazia, ou nem todos marcados: icon '☐', text 'Selecionar'
+        # Se todos marcados (e lista não-vazia): icon '☑', text 'Desmarcar'
+        todos = all(i.is_checked() for i in self._file_items) if self._file_items else False
+        
+        self._sel_all_btn.setText(
+            "☑  Desmarcar Todos" if todos else "☐  Selecionar Todos"
+        )
 
     def _toggle_all(self):
+        if not self._file_items: return
         todos = all(i.is_checked() for i in self._file_items)
+        # Se já estavam todos marcados, vamos desmarcar. Senão, marca tudo.
         for item in self._file_items:
             item.set_checked(not todos)
-        self._sel_all_btn.setText(
-            "☐  Desmarcar Todos" if not todos else "☑  Selecionar Todos"
-        )
 
     def _confirm_apps(self):
         if not any(i.is_checked() for i in self._file_items):

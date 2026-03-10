@@ -14,12 +14,12 @@ from PyQt6.QtWidgets import (
     QStackedWidget, QSizePolicy, QDialog,
     QLineEdit, QPushButton
 )
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QPoint
 from PyQt6.QtGui import QFont, QIcon
 
 from ui.theme import COLORS, FONT_SANS, FONT_MONO, get_stylesheet, set_theme
 from ui.theme_manager import theme_manager
-from ui.widgets import spacer, h_line, WorkerGuardDialog
+from ui.widgets import spacer, h_line, WorkerGuardDialog, FadeStackedWidget
 from ui.page_menu               import PageMenu
 from ui.page_scan               import PageScan
 from ui.page_atalhos            import PageAtalhos
@@ -452,12 +452,22 @@ class FooterWidget(QWidget):
         self._dev_lbl.setStyleSheet(f"color: {COLORS['text_dim']}; background: transparent;")
 
 
-# ── SIDEBAR ───────────────────────────────────────────────────────────────────
-
 class Sidebar(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedWidth(220)
+        self.setObjectName("Sidebar")
+
+        # Barra indicadora móvel
+        self._active_bar = QWidget(self)
+        self._active_bar.setFixedWidth(4)
+        self._active_bar.setFixedHeight(24)
+        self._active_bar.setObjectName("active_bar")
+        self._active_bar.hide() # Escondida até ter um item ativo
+
+        self._active_anim = QPropertyAnimation(self._active_bar, b"pos")
+        self._active_anim.setDuration(300)
+        self._active_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
 
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -538,7 +548,10 @@ class Sidebar(QWidget):
         return line
 
     def _upd(self, _mode: str = ""):
-        self.setStyleSheet(f"background: {COLORS['surface2']};")
+        self.setStyleSheet(f"""
+            QWidget#Sidebar {{ background: {COLORS['surface2']}; }}
+            QWidget#active_bar {{ background: {COLORS['accent']}; border-radius: 2px; }}
+        """)
         self._inner.setStyleSheet(f"background: {COLORS['surface2']};")
         self._border.setStyleSheet(f"background: {COLORS['border']}; border: none;")
         self._div_top.setStyleSheet(f"background: {COLORS['border']}; border: none;")
@@ -550,6 +563,15 @@ class Sidebar(QWidget):
         for n in self._all:
             n.set_active(False)
         nav.set_active(True)
+
+        # Move o indicador
+        if not self._active_bar.isVisible():
+            self._active_bar.show()
+            self._active_bar.move(0, nav.y() + 6) # +6 ajusta para centralizar verticalmente no item
+        else:
+            self._active_anim.stop()
+            self._active_anim.setEndValue(nav.pos() + QPoint(0, 6))
+            self._active_anim.start()
 
     def unlock_modes(self):
         self.nav_atalhos.set_enabled(True)
@@ -591,7 +613,7 @@ class MainWindow(QMainWindow):
         self._sidebar = Sidebar()
         root.addWidget(self._sidebar)
 
-        self._stack = QStackedWidget()
+        self._stack = FadeStackedWidget()
         root.addWidget(self._stack)
 
         self._page_menu             = PageMenu()

@@ -28,7 +28,7 @@ from PyQt6.QtGui import QFont, QPainter, QColor, QBrush
 
 from ui.widgets import (
     PageTitle, SectionHeader, AlertBox, LogConsole,
-    ServerItem, spacer
+    ServerItem, spacer, LoadingSpinner, FadeStackedWidget
 )
 from ui.theme import COLORS, FONT_MONO, FONT_SANS
 from ui.theme_manager import theme_manager
@@ -103,7 +103,27 @@ def _apply_secondary(btn: QPushButton):
         QPushButton:pressed {{
             background-color: {COLORS['panel_press']};
         }}
+        QPushButton[class="danger"] {{
+            background-color: {COLORS['danger_dim']};
+            border: 1.5px solid {COLORS['danger']};
+            color: {COLORS['danger']};
+        }}
+        QPushButton[class="danger"]:hover {{
+            background-color: {COLORS['danger']};
+            color: #ffffff;
+        }}
     """)
+
+def _make_danger_btn(text: str, min_width: int = 140) -> QPushButton:
+    btn = QPushButton(text)
+    btn.setProperty("class", "danger")
+    btn.setMinimumWidth(min_width)
+    btn.setMinimumHeight(36)
+    btn.setCursor(Qt.CursorShape.PointingHandCursor)
+    btn.setFont(QFont(FONT_SANS, 12, QFont.Weight.Bold))
+    _apply_secondary(btn) # Reutiliza o sistema de estilo
+    theme_manager.theme_changed.connect(lambda _: _apply_secondary(btn))
+    return btn
 
 
 # ── TOGGLE SWITCH ─────────────────────────────────────────────────────────────
@@ -170,9 +190,14 @@ class MethodCard(QWidget):
 
     def __init__(self, name: str, desc: str, checked: bool = False, parent=None):
         super().__init__(parent)
+        self.setObjectName("MethodCard")
         self._state = "normal"
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedHeight(64)
+        self._offset_y = 0
+        self._lift_anim = QPropertyAnimation(self, b"offset_y")
+        self._lift_anim.setDuration(150)
+        self._lift_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
 
         lay = QHBoxLayout(self)
         lay.setContentsMargins(14, 0, 12, 0)
@@ -223,13 +248,29 @@ class MethodCard(QWidget):
         if e.button() == Qt.MouseButton.LeftButton:
             self._toggle.setChecked(not self._toggle.isChecked())
 
+    @pyqtProperty(int)
+    def offset_y(self):
+        return self._offset_y
+
+    @offset_y.setter
+    def offset_y(self, v):
+        self._offset_y = v
+        self.layout().setContentsMargins(14, v, 12, -v)
+        self.update()
+
     def enterEvent(self, e):
         self._state = "hover"
         self._upd()
+        self._lift_anim.stop()
+        self._lift_anim.setEndValue(-3)
+        self._lift_anim.start()
 
     def leaveEvent(self, e):
         self._state = "normal"
         self._upd()
+        self._lift_anim.stop()
+        self._lift_anim.setEndValue(0)
+        self._lift_anim.start()
 
     def _upd(self, _=None):
         checked = self._toggle.isChecked()
@@ -282,7 +323,7 @@ class PageScan(QWidget):
 
         lay.addWidget(PageTitle("DESCOBERTA", "Escaneamento de Rede"))
 
-        self._stack = QStackedWidget()
+        self._stack = FadeStackedWidget()
         lay.addWidget(self._stack)
 
         self._stack.addWidget(self._build_method_page())
@@ -424,10 +465,7 @@ class PageScan(QWidget):
         status_lay.setContentsMargins(24, 20, 24, 20)
         status_lay.setSpacing(8)
 
-        self._spin_lbl = QLabel("◌")
-        self._spin_lbl.setFont(QFont(FONT_MONO, 28))
-        self._spin_lbl.setStyleSheet(f"color: {COLORS['accent']}; background: transparent; border: none;")
-        self._spin_lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self._spinner = LoadingSpinner(size=44)
 
         self._status_lbl = QLabel("ESCANEANDO REDE...")
         self._status_lbl.setFont(QFont(FONT_SANS, 13, QFont.Weight.Bold))
@@ -439,13 +477,13 @@ class PageScan(QWidget):
         self._status_sub.setStyleSheet(f"color: {COLORS['text_dim']}; background: transparent; border: none;")
         self._status_sub.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
-        status_lay.addWidget(self._spin_lbl)
+        status_lay.addWidget(self._spinner, 0, Qt.AlignmentFlag.AlignHCenter)
         status_lay.addWidget(self._status_lbl)
         status_lay.addWidget(self._status_sub)
 
         self._scan_console = LogConsole(max_height=220)
 
-        btn_stop = _make_secondary_btn("⊗  Parar", 140)
+        btn_stop = _make_danger_btn("✕  INTERROMPER", 160)
         btn_stop.clicked.connect(self._stop_scan)
 
         btn_row = QHBoxLayout()
@@ -461,10 +499,6 @@ class PageScan(QWidget):
         lay.addWidget(btn_row_w)
         lay.addStretch()
 
-        self._spin_chars = ["◐", "◓", "◑", "◒"]
-        self._spin_idx   = 0
-        self._spin_timer = QTimer(self)
-        self._spin_timer.timeout.connect(self._tick_spinner)
         return w
 
     def _build_results_page(self) -> QWidget:
@@ -518,7 +552,7 @@ class PageScan(QWidget):
         if self._worker and self._worker.isRunning():
             self._worker.stop()
             self._worker.wait(2000)
-        self._spin_timer.stop()
+        self._spinner.stop()
         self._build_hist_section()
         self._stack.setCurrentIndex(0)
 
@@ -533,7 +567,7 @@ class PageScan(QWidget):
         self._status_lbl.setText("ESCANEANDO REDE...")
         self._status_sub.setText(f"Método: {metodo.nome}")
         self._stack.setCurrentIndex(1)
-        self._spin_timer.start(180)
+        self._spinner.start()
 
         self._worker = ScanWorker(metodo=metodo.key)
         self._worker.log_line.connect(self._scan_console.append_line)
@@ -544,15 +578,11 @@ class PageScan(QWidget):
     def _stop_scan(self):
         if self._worker:
             self._worker.stop()
-        self._spin_timer.stop()
+        self._spinner.stop()
         self._stack.setCurrentIndex(0)
 
-    def _tick_spinner(self):
-        self._spin_lbl.setText(self._spin_chars[self._spin_idx % len(self._spin_chars)])
-        self._spin_idx += 1
-
     def _on_scan_finished(self, servidores: list):
-        self._spin_timer.stop()
+        self._spinner.stop()
         self._servidores = servidores
         if not servidores:
             self._status_lbl.setText("NENHUM SERVIDOR ENCONTRADO")

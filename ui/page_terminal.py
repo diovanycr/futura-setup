@@ -1,5 +1,5 @@
 # =============================================================================
-# FUTURA SETUP — Página: Novo Terminal (MODO 02)
+# FUTURA SETUP — Página: Novo Terminal
 # Melhorias v2:
 #   - AlertBox importado no topo (sem import tardio dentro de _start_install)
 #   - os.path.join / os.path.exists / os.path.basename → Path (consistente)
@@ -131,7 +131,7 @@ class PageTerminal(QWidget):
         lay.setContentsMargins(40, 36, 40, 36)
         lay.setSpacing(0)
 
-        lay.addWidget(PageTitle("MODO 02", "Novo Terminal"))
+        lay.addWidget(PageTitle("TERMINAL", "Novo Terminal"))
 
         self._step_ind = StepIndicator(STEP_NAMES)
         lay.addWidget(self._step_ind)
@@ -660,7 +660,7 @@ class PageTerminal(QWidget):
                 rows.append(("", f"  • {nome}"))
 
         self._ultimo_relatorio = {
-            "modo":    "02 — Novo Terminal",
+            "modo":    "Novo Terminal",
             "titulo":  titulo,
             "sucesso": sucesso,
             "campos":  rows,
