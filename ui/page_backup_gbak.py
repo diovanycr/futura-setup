@@ -197,11 +197,9 @@ class _PathField(QWidget):
         self._lbl  = QLabel(label_text)
         self._edit = QLineEdit()
         self._edit.setPlaceholderText(placeholder)
-        self._edit.setMinimumHeight(28)
 
         self._btn = make_folder_btn(self)
         self._btn.setMaximumWidth(40)
-        self._btn.setMinimumHeight(28)
         self._btn.clicked.connect(self._browse)
 
         row = QHBoxLayout()
@@ -219,14 +217,19 @@ class _PathField(QWidget):
         self._lbl.setStyleSheet(
             f"color: {COLORS['text']}; font-size: 12px; font-weight: 600;"
         )
-        self._edit.setStyleSheet(
-            f"background: {COLORS['surface']};"
-            f"color: {COLORS['text']};"
-            f"border: 1px solid {COLORS['text_dim']};"
-            f"border-radius: 5px;"
-            f"padding: 3px 7px;"
-            f"font-size: 12px;"
-        )
+        self._edit.setStyleSheet(f"""
+            QLineEdit {{
+                background: {COLORS['surface']};
+                color: {COLORS['text']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 6px;
+                padding: 4px 12px;
+                font-size: 11px;
+            }}
+            QLineEdit:focus {{
+                border-color: {COLORS['accent']};
+            }}
+        """)
 
     def _browse(self):
         current = self._edit.text().strip()

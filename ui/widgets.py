@@ -1232,6 +1232,9 @@ class CustomPathCard(QWidget):
                 color: {COLORS['text_mid']};
                 font-size: 11px;
             }}
+            QLineEdit#cpc_input:focus {{
+                border-color: {COLORS['accent']};
+            }}
         """)
 
         txt.addWidget(self._title_lbl)

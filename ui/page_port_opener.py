@@ -344,8 +344,7 @@ class _StepConfig(QWidget):
         input_row.setSpacing(8)
         self._port_input = QLineEdit()
         self._port_input.setPlaceholderText("Digite a porta (ex: 3050) e pressione Enter ou ＋")
-        self._port_input.setMinimumHeight(32)   # ← compactado
-        self._port_input.setFont(QFont(FONT_MONO, 12))   # ← menor
+        self._port_input.setPlaceholderText("Digite a porta (ex: 3050) e pressione Enter ou ＋")
         self._port_input.returnPressed.connect(self._add_from_input)
 
         self._btn_add = make_primary_btn("＋ ADICIONAR", 120)
@@ -447,10 +446,19 @@ class _StepConfig(QWidget):
         self._upd()
 
     def _upd(self, _mode: str = ""):
-        self._port_input.setStyleSheet(
-            f"background:{COLORS['surface']}; color:{COLORS['text']};"
-            f"border:1px solid {COLORS['text_dim']}; border-radius:6px; padding:4px 10px;"
-        )
+        self._port_input.setStyleSheet(f"""
+            QLineEdit {{
+                background: {COLORS['surface']};
+                color: {COLORS['text']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 6px;
+                padding: 4px 12px;
+                font-size: 11px;
+            }}
+            QLineEdit:focus {{
+                border-color: {COLORS['accent']};
+            }}
+        """)
 
     # ------------------------------------------------------------------
     def _add_from_input(self):

@@ -64,11 +64,8 @@ class _PathFieldDB(QWidget):
         self._lbl  = QLabel("Caminho do banco de dados (.fdb)")
         self._edit = QLineEdit()
         self._edit.setPlaceholderText(r"Ex: C:\Futura\Dados\DADOS.fdb")
-        self._edit.setMinimumHeight(28)
-        self._edit.setFont(QFont(FONT_MONO, 10))
 
         self._btn = make_folder_btn(self)
-        self._btn.setFixedSize(28, 28)
         self._btn.setToolTip("Selecionar arquivo .fdb")
         self._btn.clicked.connect(self._browse)
 
@@ -99,15 +96,7 @@ class _PathFieldDB(QWidget):
             }}
             QLineEdit:focus {{ border-color: {COLORS['accent']}; }}
         """)
-        self._btn.setStyleSheet(f"""
-            QPushButton {{
-                background: {COLORS['surface']};
-                border: 1.5px solid {COLORS['border']};
-                border-radius: 5px;
-            }}
-            QPushButton:hover {{ background: {COLORS['panel_hover']}; }}
-            QPushButton:pressed {{ background: {COLORS['panel_press']}; }}
-        """)
+
 
     def _browse(self):
         path, _ = QFileDialog.getOpenFileName(

@@ -79,8 +79,6 @@ class _FormField(QWidget):
         self._lbl  = QLabel(label_text)
         self._edit = QLineEdit()
         self._edit.setPlaceholderText(placeholder)
-        self._edit.setMinimumHeight(28)
-        self._edit.setFont(QFont(FONT_MONO, 10))
 
         if input_type == "number":
             # Aceita apenas digitos
@@ -441,16 +439,15 @@ class _PathFieldDB(QWidget):
         self._lbl  = QLabel("Caminho do banco de dados (.fdb)")
         self._edit = QLineEdit()
         self._edit.setPlaceholderText(r"Ex: C:\Futura\Dados\DADOS.fdb")
-        self._edit.setMinimumHeight(28)
-        self._edit.setFont(QFont(FONT_MONO, 10))
 
         self._btn = make_folder_btn(self)
-        self._btn.setFixedSize(28, 28)
         self._btn.setToolTip("Selecionar arquivo .fdb")
         self._btn.clicked.connect(self._browse)
 
         row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(3)
+        row.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         row.addWidget(self._edit, 1)
         row.addWidget(self._btn)
 
@@ -476,15 +473,7 @@ class _PathFieldDB(QWidget):
             }}
             QLineEdit:focus {{ border-color: {COLORS['accent']}; }}
         """)
-        self._btn.setStyleSheet(f"""
-            QPushButton {{
-                background: {COLORS['surface']};
-                border: 1.5px solid {COLORS['border']};
-                border-radius: 5px;
-            }}
-            QPushButton:hover {{ background: {COLORS['panel_hover']}; }}
-            QPushButton:pressed {{ background: {COLORS['panel_press']}; }}
-        """)
+
 
     def _browse(self):
         path, _ = QFileDialog.getOpenFileName(

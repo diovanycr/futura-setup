@@ -166,8 +166,6 @@ class PageDiagnostico(QWidget):
 
         self._campo_alvo = QLineEdit()
         self._campo_alvo.setPlaceholderText("Ex: 192.168.1.10  ou  SERVIDOR-01")
-        self._campo_alvo.setFixedHeight(38)
-        self._campo_alvo.setFont(QFont(FONT_MONO, 12))
         self._campo_alvo.returnPressed.connect(self._iniciar)
         self._campo_alvo.setObjectName("campo_alvo")
         lay.addWidget(self._campo_alvo)
@@ -176,9 +174,9 @@ class PageDiagnostico(QWidget):
         lay.addWidget(h_line())
         lay.addWidget(spacer(h=8))
 
-        btn_iniciar = make_primary_btn("🔍  INICIAR DIAGNÓSTICO", 200)
+        btn_iniciar = make_primary_btn("🔍  INICIAR DIAGNÓSTICO", 160)
         btn_iniciar.clicked.connect(self._iniciar)
-        btn_voltar = make_secondary_btn("← VOLTAR", 120)
+        btn_voltar = make_secondary_btn("← VOLTAR", 80)
         btn_voltar.clicked.connect(self.go_menu.emit)
         lay.addWidget(btn_row(btn_iniciar, btn_voltar))
 
@@ -243,9 +241,9 @@ class PageDiagnostico(QWidget):
         lay.addWidget(h_line())
         lay.addWidget(spacer(h=8))
 
-        btn_novo = make_secondary_btn("🔄  NOVO DIAGNÓSTICO", 180)
+        btn_novo = make_secondary_btn("🔄  NOVO DIAGNÓSTICO", 160)
         btn_novo.clicked.connect(self._go_novo)
-        btn_voltar = make_secondary_btn("← VOLTAR", 120)
+        btn_voltar = make_secondary_btn("← VOLTAR", 80)
         btn_voltar.clicked.connect(self.go_menu.emit)
         lay.addWidget(btn_row(btn_novo, btn_voltar))
 
