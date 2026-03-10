@@ -33,6 +33,7 @@ from ui.widgets import (
     PageTitle, SectionHeader, AlertBox, ResultBox,
     make_primary_btn, make_secondary_btn, make_folder_btn, btn_row,
     h_line, label, spacer,
+    ProgressBlock, BusyOverlay,
 )
 from core.logger import log
 from core.db_funcionario import (
@@ -1126,6 +1127,7 @@ class PageEditarFuncionario(QWidget):
         self._stack.addWidget(self._result)   # 2
 
         root.addWidget(self._stack, 1)
+        self._overlay = BusyOverlay(self)
 
         # Conexoes
         self._form.buscar.connect(self._on_buscar)
@@ -1171,10 +1173,12 @@ class PageEditarFuncionario(QWidget):
         worker.finished.connect(lambda: self._limpar_worker(worker))
         self._worker = worker
         worker.start()
+        self._overlay.show_with("Buscando funcionário…")
 
         log.info(f"[EditarFuncionario] Buscando FK_CADASTRO={fk_cadastro}...")
 
     def _on_busca_ok(self, dados):
+        self._overlay.hide_spinner()
         if dados is None:
             self._form.set_erro(
                 f"Funcionário com FK_CADASTRO={self._fk_cadastro} não encontrado."
@@ -1188,6 +1192,7 @@ class PageEditarFuncionario(QWidget):
         log.info(f"[EditarFuncionario] Funcionário encontrado: {dados}")
 
     def _on_busca_erro(self, msg: str):
+        self._overlay.hide_spinner()
         self._form.set_erro(f"Erro ao conectar: {msg}")
         log.error(f"[EditarFuncionario] Erro na busca: {msg}")
 
@@ -1204,11 +1209,13 @@ class PageEditarFuncionario(QWidget):
         worker.finished.connect(lambda: self._limpar_worker(worker))
         self._worker = worker
         worker.start()
+        self._overlay.show_with("Salvando alteração…")
         log.info(
             f"[EditarFuncionario] Gravando PIS para FK_CADASTRO={self._fk_cadastro}..."
         )
 
     def _on_gravar_ok(self, pis_gravado: str):
+        self._overlay.hide_spinner()
         self._result.set_resultado(True, self._fk_cadastro, pis_gravado)
         self._stack.setCurrentIndex(self._IDX_RESULT)
         log.ok(
@@ -1217,6 +1224,7 @@ class PageEditarFuncionario(QWidget):
         )
 
     def _on_gravar_erro(self, msg: str):
+        self._overlay.hide_spinner()
         self._confirm.reabilitar()
         self._result.set_resultado(False, self._fk_cadastro, self._novo_pis, erro=msg)
         self._stack.setCurrentIndex(self._IDX_RESULT)

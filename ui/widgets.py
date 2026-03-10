@@ -26,7 +26,7 @@ from PyQt6.QtWidgets import (
     QGridLayout, QScrollArea, QFileDialog, QLineEdit,
     QApplication
 )
-from PyQt6.QtCore import Qt, pyqtSignal, pyqtProperty, QPropertyAnimation, QEasingCurve, QByteArray, QRectF
+from PyQt6.QtCore import Qt, pyqtSignal, pyqtProperty, QPropertyAnimation, QEasingCurve, QByteArray, QRectF, QTimer
 from PyQt6.QtGui import QFont, QPainter, QColor, QBrush, QPen, QIcon, QPixmap
 from PyQt6.QtSvg import QSvgRenderer
 
@@ -165,6 +165,100 @@ def make_folder_btn(parent=None) -> QPushButton:
     btn.setCursor(Qt.CursorShape.PointingHandCursor)
     btn.setToolTip("Selecionar pasta")
     return btn
+
+
+# ── BUSY OVERLAY ──────────────────────────────────────────────────────────────
+
+class BusyOverlay(QWidget):
+    """Spinner translúcido que cobre o widget pai durante operações longas.
+
+    Uso:
+        overlay = BusyOverlay(self)          # parent = página/widget a cobrir
+        overlay.show()                       # inicia animação
+        overlay.hide()                       # para animação
+    """
+
+    def __init__(self, parent: QWidget):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
+        self._angle   = 0
+        self._message = "Aguarde…"
+
+        self._timer = QTimer(self)
+        self._timer.setInterval(25)          # ~40 fps
+        self._timer.timeout.connect(self._tick)
+        self.hide()
+        self._resize_to_parent()
+
+    # ── helpers ────────────────────────────────────────────────────────────────
+
+    def _resize_to_parent(self):
+        if self.parent():
+            self.setGeometry(self.parent().rect())
+
+    def show_with(self, message: str = "Aguarde…"):
+        self._message = message
+        self._resize_to_parent()
+        self.raise_()
+        self.show()
+        self._timer.start()
+
+    def hide_spinner(self):
+        self._timer.stop()
+        self.hide()
+
+    def _tick(self):
+        self._angle = (self._angle + 9) % 360
+        self.update()
+
+    # ── resize tracking ────────────────────────────────────────────────────────
+
+    def resizeEvent(self, event):
+        self._resize_to_parent()
+        super().resizeEvent(event)
+
+    # ── paint ─────────────────────────────────────────────────────────────────
+
+    def paintEvent(self, event):
+        from PyQt6.QtGui import QPainterPath
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Fundo semitransparente
+        from ui.theme import COLORS
+        r, g, b = hex_to_rgb(COLORS["bg"])
+        painter.fillRect(self.rect(), QColor(r, g, b, 200))
+
+        cx = self.width()  // 2
+        cy = self.height() // 2
+        R  = 28
+
+        # Track - arco de fundo
+        track_pen = QPen(QColor(r, g, b, 80))
+        track_pen.setWidth(5)
+        track_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(track_pen)
+        painter.drawEllipse(cx - R, cy - R, R * 2, R * 2)
+
+        # Arco giratório
+        ar, ag, ab = hex_to_rgb(COLORS["accent"])
+        arc_pen = QPen(QColor(ar, ag, ab, 230))
+        arc_pen.setWidth(5)
+        arc_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(arc_pen)
+        start_angle = (90 - self._angle) * 16  # Qt usa 1/16 grau
+        span_angle  = -270 * 16                # arco de 270°
+        painter.drawArc(cx - R, cy - R, R * 2, R * 2, start_angle, span_angle)
+
+        # Texto
+        painter.setPen(QColor(COLORS["text"]))
+        painter.setFont(QFont(FONT_SANS, 11))
+        text_rect = self.rect().adjusted(0, cy + R + 14, 0, 0)
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, self._message)
+
+        painter.end()
+
 
 def btn_row(*btns, centered: bool = True) -> QWidget:
     """Cria uma linha de botões centralizada ou alinhada à esquerda."""

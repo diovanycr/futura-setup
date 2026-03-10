@@ -28,8 +28,9 @@ from PyQt6.QtWidgets import (
 from ui.theme import COLORS, FONT_SANS, FONT_MONO
 from ui.theme_manager import theme_manager
 from ui.widgets import (
-    PageTitle, SectionHeader, AlertBox, make_primary_btn, make_secondary_btn,
-    make_folder_btn, btn_row, spacer, label, h_line,
+    PageTitle, SectionHeader, AlertBox, LogConsole, make_primary_btn,
+    make_secondary_btn, make_folder_btn, btn_row, spacer, label, h_line,
+    BusyOverlay,
 )
 from core.logger import log
 from core.db_mobile import (
@@ -581,6 +582,7 @@ class PageImplantarMobile(QWidget):
         self._stack.addWidget(self._result)  # 1
 
         root.addWidget(self._stack, 1)
+        self._overlay = BusyOverlay(self)
 
         # Conexoes
         self._form.implantar.connect(self._on_implantar)
@@ -617,14 +619,17 @@ class PageImplantarMobile(QWidget):
         worker.finished.connect(lambda: self._limpar_worker(worker))
         self._worker = worker
         worker.start()
+        self._overlay.show_with("Implantando Mobile… aguarde.")
 
         log.info(f"[ImplantarMobile] Iniciando implantacao em {self._database}...")
 
     def _on_concluido(self, resultados: list):
+        self._overlay.hide_spinner()
         self._result.set_resultado(resultados)
         self._stack.setCurrentIndex(self._IDX_RESULT)
 
     def _on_erro(self, msg: str):
+        self._overlay.hide_spinner()
         self._form.set_erro(msg)
         log.error(f"[ImplantarMobile] Erro: {msg}")
 
@@ -640,10 +645,12 @@ class PageImplantarMobile(QWidget):
         worker.finished.connect(lambda: self._limpar_worker(worker))
         self._worker = worker
         worker.start()
+        self._overlay.show_with("Removendo CHANGE_TABLET… aguarde.")
 
         log.info(f"[ImplantarMobile] Removendo CHANGE_TABLET em {self._database}...")
 
     def _on_remocao_concluida(self, resultado: dict):
+        self._overlay.hide_spinner()
         self._result.set_resultado([resultado])
         self._stack.setCurrentIndex(self._IDX_RESULT)
         total_erros = len(resultado["erros"])
@@ -653,6 +660,7 @@ class PageImplantarMobile(QWidget):
             log.warn(f"[ImplantarMobile] Remocao concluida com {total_erros} erro(s).")
 
     def _on_remocao_erro(self, msg: str):
+        self._overlay.hide_spinner()
         self._form.set_erro(msg)
         log.error(f"[ImplantarMobile] Erro na remocao: {msg}")
 

@@ -19,7 +19,7 @@ from ui.theme import COLORS, FONT_SANS, FONT_MONO
 from ui.theme_manager import theme_manager
 from ui.widgets import (
     PageTitle, SectionHeader, AlertBox, make_primary_btn, make_secondary_btn,
-    btn_row, spacer, h_line, label,
+    btn_row, spacer, h_line, label, BusyOverlay,
 )
 from core.diagnostico import DiagnosticoWorker, DiagItem
 
@@ -128,6 +128,7 @@ class PageDiagnostico(QWidget):
         self._stack.addWidget(self._build_resultado())
 
         self._go_step(self._IDX_CONFIG)
+        self._overlay = BusyOverlay(self)
 
     def reset(self):
         if self._worker and self._worker.isRunning():
@@ -282,6 +283,7 @@ class PageDiagnostico(QWidget):
 
         self._running_titulo.setText(f"Testando {alvo}…")
         self._go_step(self._IDX_RUNNING)
+        self._overlay.show_with(f"Testando {alvo}…")
 
         self._worker = DiagnosticoWorker(alvo)
         self._worker.item_pronto.connect(self._on_item_pronto)
@@ -293,6 +295,7 @@ class PageDiagnostico(QWidget):
             self._cards[idx].atualizar(item)
 
     def _on_finalizado(self, itens: list[DiagItem]):
+        self._overlay.hide_spinner()
         self._worker = None
 
         while self._res_cards_lay.count():
@@ -327,6 +330,7 @@ class PageDiagnostico(QWidget):
             self._worker.stop()
             self._worker.wait(1000)
         self._worker = None
+        self._overlay.hide_spinner()
         self._go_step(self._IDX_CONFIG)
 
     def _go_step(self, idx: int):
