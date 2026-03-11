@@ -34,6 +34,8 @@ from ui.page_editar_funcionario import PageEditarFuncionario
 from ui.page_implantar_mobile   import PageImplantarMobile
 from ui.page_shutdown_online    import PageShutdownOnline
 from ui.page_utilitarios        import PageUtilitarios
+from ui.page_instalar_firebird  import PageInstalarFirebird
+from ui.page_verificar_versao_fdb import PageVerificarVersaoFdb
 from core.logger                import log
 from config                     import APP_VERSION
 
@@ -463,7 +465,7 @@ class Sidebar(QWidget):
         self._active_bar.setFixedWidth(4)
         self._active_bar.setFixedHeight(24)
         self._active_bar.setObjectName("active_bar")
-        self._active_bar.hide() # Escondida até ter um item ativo
+        self._active_bar.hide()
 
         self._active_anim = QPropertyAnimation(self._active_bar, b"pos")
         self._active_anim.setDuration(300)
@@ -532,7 +534,6 @@ class Sidebar(QWidget):
         root.addWidget(self._inner, 1)
         root.addWidget(self._border)
 
-        # Lista de todos os nav items para controle de active
         self._all = [
             self.nav_menu, self.nav_utilitarios,
             self.nav_atalhos, self.nav_terminal, self.nav_atualizacao,
@@ -564,10 +565,9 @@ class Sidebar(QWidget):
             n.set_active(False)
         nav.set_active(True)
 
-        # Move o indicador
         if not self._active_bar.isVisible():
             self._active_bar.show()
-            self._active_bar.move(0, nav.y() + 6) # +6 ajusta para centralizar verticalmente no item
+            self._active_bar.move(0, nav.y() + 6)
         else:
             self._active_anim.stop()
             self._active_anim.setEndValue(nav.pos() + QPoint(0, 6))
@@ -580,20 +580,22 @@ class Sidebar(QWidget):
 
 # ── MAIN WINDOW ───────────────────────────────────────────────────────────────
 
-_IDX_MENU              = 0
-_IDX_SCAN              = 1
-_IDX_ATALHOS           = 2
-_IDX_TERMINAL          = 3
-_IDX_RESTAURAR         = 4
-_IDX_LOG               = 5
-_IDX_ATUALIZACAO       = 6
-_IDX_BACKUP_GBAK       = 7
-_IDX_PORT_OPENER       = 8
-_IDX_DIAGNOSTICO       = 9
-_IDX_EDITAR_FUNC       = 10
-_IDX_IMPLANTAR_MOBILE  = 11
-_IDX_SHUTDOWN_ONLINE   = 12
-_IDX_UTILITARIOS       = 13
+_IDX_MENU                 = 0
+_IDX_SCAN                 = 1
+_IDX_ATALHOS              = 2
+_IDX_TERMINAL             = 3
+_IDX_RESTAURAR            = 4
+_IDX_LOG                  = 5
+_IDX_ATUALIZACAO          = 6
+_IDX_BACKUP_GBAK          = 7
+_IDX_PORT_OPENER          = 8
+_IDX_DIAGNOSTICO          = 9
+_IDX_EDITAR_FUNC          = 10
+_IDX_IMPLANTAR_MOBILE     = 11
+_IDX_SHUTDOWN_ONLINE      = 12
+_IDX_UTILITARIOS          = 13
+_IDX_INSTALAR_FIREBIRD    = 14
+_IDX_VERIFICAR_VERSAO_FDB = 15  # ← novo
 
 
 class MainWindow(QMainWindow):
@@ -616,36 +618,40 @@ class MainWindow(QMainWindow):
         self._stack = FadeStackedWidget()
         root.addWidget(self._stack)
 
-        self._page_menu             = PageMenu()
-        self._page_scan             = PageScan()
-        self._page_atalhos          = PageAtalhos()
-        self._page_terminal         = PageTerminal()
-        self._page_restaurar        = PageRestaurar()
-        self._page_log              = PageLog()
-        self._page_atualizacao      = PageAtualizacao()
-        self._page_backup_gbak      = PageBackupGbak()
-        self._page_port_opener      = PagePortOpener()
-        self._page_diagnostico      = PageDiagnostico()
-        self._page_editar_func      = PageEditarFuncionario()
-        self._page_implantar_mobile  = PageImplantarMobile()
-        self._page_shutdown_online   = PageShutdownOnline()
-        self._page_utilitarios       = PageUtilitarios()
+        self._page_menu                 = PageMenu()
+        self._page_scan                 = PageScan()
+        self._page_atalhos              = PageAtalhos()
+        self._page_terminal             = PageTerminal()
+        self._page_restaurar            = PageRestaurar()
+        self._page_log                  = PageLog()
+        self._page_atualizacao          = PageAtualizacao()
+        self._page_backup_gbak          = PageBackupGbak()
+        self._page_port_opener          = PagePortOpener()
+        self._page_diagnostico          = PageDiagnostico()
+        self._page_editar_func          = PageEditarFuncionario()
+        self._page_implantar_mobile     = PageImplantarMobile()
+        self._page_shutdown_online      = PageShutdownOnline()
+        self._page_utilitarios          = PageUtilitarios()
+        self._page_instalar_firebird    = PageInstalarFirebird()
+        self._page_verificar_versao_fdb = PageVerificarVersaoFdb()  # ← novo
 
         for p in [
-            self._page_menu,             # 0
-            self._page_scan,             # 1
-            self._page_atalhos,          # 2
-            self._page_terminal,         # 3
-            self._page_restaurar,        # 4
-            self._page_log,              # 5
-            self._page_atualizacao,      # 6
-            self._page_backup_gbak,      # 7
-            self._page_port_opener,      # 8
-            self._page_diagnostico,      # 9
-            self._page_editar_func,      # 10
-            self._page_implantar_mobile,  # 11
-            self._page_shutdown_online,   # 12
-            self._page_utilitarios,       # 13
+            self._page_menu,                 # 0
+            self._page_scan,                 # 1
+            self._page_atalhos,              # 2
+            self._page_terminal,             # 3
+            self._page_restaurar,            # 4
+            self._page_log,                  # 5
+            self._page_atualizacao,          # 6
+            self._page_backup_gbak,          # 7
+            self._page_port_opener,          # 8
+            self._page_diagnostico,          # 9
+            self._page_editar_func,          # 10
+            self._page_implantar_mobile,     # 11
+            self._page_shutdown_online,      # 12
+            self._page_utilitarios,          # 13
+            self._page_instalar_firebird,    # 14
+            self._page_verificar_versao_fdb, # 15  ← novo
         ]:
             self._stack.addWidget(p)
 
@@ -664,6 +670,8 @@ class MainWindow(QMainWindow):
         self._page_utilitarios.go_editar_func.connect(self._go_editar_func)
         self._page_utilitarios.go_implantar_mobile.connect(self._go_implantar_mobile)
         self._page_utilitarios.go_shutdown_online.connect(self._go_shutdown_online)
+        self._page_utilitarios.go_instalar_firebird.connect(self._go_instalar_firebird)
+        self._page_utilitarios.go_verificar_versao_fdb.connect(self._go_verificar_versao_fdb)  # ← novo
 
         # ── Sinais do scan ──
         self._page_scan.servidor_selecionado.connect(self._on_servidor)
@@ -681,6 +689,8 @@ class MainWindow(QMainWindow):
         self._page_editar_func.go_menu.connect(self._go_utilitarios)
         self._page_implantar_mobile.go_menu.connect(self._go_utilitarios)
         self._page_shutdown_online.go_menu.connect(self._go_utilitarios)
+        self._page_instalar_firebird.go_menu.connect(self._go_utilitarios)
+        self._page_verificar_versao_fdb.go_menu.connect(self._go_utilitarios)  # ← novo
 
         # ── Sidebar clicks ──
         self._sidebar.nav_menu.on_click(lambda: self._navigate(self._go_menu))
@@ -750,6 +760,8 @@ class MainWindow(QMainWindow):
             self._page_editar_func,
             self._page_implantar_mobile,
             self._page_shutdown_online,
+            self._page_instalar_firebird,
+            self._page_verificar_versao_fdb,  # ← novo
         ]
 
     def _get_active_workers(self) -> list:
@@ -774,14 +786,16 @@ class MainWindow(QMainWindow):
     def _get_page_nav_map(self) -> dict:
         if not self._page_nav_map:
             self._page_nav_map = {
-                self._page_atalhos:          self._sidebar.nav_atalhos,
-                self._page_terminal:         self._sidebar.nav_terminal,
-                self._page_atualizacao:      self._sidebar.nav_atualizacao,
-                self._page_backup_gbak:      self._sidebar.nav_utilitarios,
-                self._page_port_opener:      self._sidebar.nav_utilitarios,
-                self._page_editar_func:      self._sidebar.nav_utilitarios,
-                self._page_implantar_mobile: self._sidebar.nav_utilitarios,
-                self._page_shutdown_online:  self._sidebar.nav_utilitarios,
+                self._page_atalhos:              self._sidebar.nav_atalhos,
+                self._page_terminal:             self._sidebar.nav_terminal,
+                self._page_atualizacao:          self._sidebar.nav_atualizacao,
+                self._page_backup_gbak:          self._sidebar.nav_utilitarios,
+                self._page_port_opener:          self._sidebar.nav_utilitarios,
+                self._page_editar_func:          self._sidebar.nav_utilitarios,
+                self._page_implantar_mobile:     self._sidebar.nav_utilitarios,
+                self._page_shutdown_online:      self._sidebar.nav_utilitarios,
+                self._page_instalar_firebird:    self._sidebar.nav_utilitarios,
+                self._page_verificar_versao_fdb: self._sidebar.nav_utilitarios,  # ← novo
             }
         return self._page_nav_map
 
@@ -855,6 +869,14 @@ class MainWindow(QMainWindow):
     def _go_shutdown_online(self):
         self._page_shutdown_online.reset()
         self._show(_IDX_SHUTDOWN_ONLINE, self._sidebar.nav_utilitarios)
+
+    def _go_instalar_firebird(self):
+        self._page_instalar_firebird.reset()
+        self._show(_IDX_INSTALAR_FIREBIRD, self._sidebar.nav_utilitarios)
+
+    def _go_verificar_versao_fdb(self):                                          # ← novo
+        self._page_verificar_versao_fdb.reset()
+        self._show(_IDX_VERIFICAR_VERSAO_FDB, self._sidebar.nav_utilitarios)
 
     def _start_atalhos(self):
         self._flow_mode = "atalhos"

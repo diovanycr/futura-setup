@@ -130,14 +130,16 @@ class ActionButton(QWidget):
 
 
 class PageUtilitarios(QWidget):
-    go_menu            = pyqtSignal()
-    go_log             = pyqtSignal()
-    go_backup_gbak     = pyqtSignal()
-    go_port_opener     = pyqtSignal()
-    go_diagnostico     = pyqtSignal()
-    go_editar_func     = pyqtSignal()
-    go_implantar_mobile = pyqtSignal()
-    go_shutdown_online  = pyqtSignal()
+    go_menu                 = pyqtSignal()
+    go_log                  = pyqtSignal()
+    go_backup_gbak          = pyqtSignal()
+    go_port_opener          = pyqtSignal()
+    go_diagnostico          = pyqtSignal()
+    go_editar_func          = pyqtSignal()
+    go_implantar_mobile     = pyqtSignal()
+    go_shutdown_online      = pyqtSignal()
+    go_instalar_firebird    = pyqtSignal()
+    go_verificar_versao_fdb = pyqtSignal()  # ← novo
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -154,25 +156,31 @@ class PageUtilitarios(QWidget):
         items = [
             ("01", "Ver Log",
              "Visualiza o histórico de operações e eventos do sistema",
-             COLORS["accent2"],  self.go_log),
+             COLORS["accent2"], self.go_log),
             ("02", "Backup / Restaurar DB",
              "Gera ou restaura backup do banco de dados Firebird (.gbak)",
-             COLORS["accent2"],  self.go_backup_gbak),
+             COLORS["accent2"], self.go_backup_gbak),
             ("03", "Firewall — Portas",
              "Abre ou fecha portas no firewall do Windows",
-             COLORS["accent2"],  self.go_port_opener),
+             COLORS["accent2"], self.go_port_opener),
             ("04", "Diagnóstico",
              "Testa conectividade, share, Firebird e versão de um servidor",
-             COLORS["accent2"],  self.go_diagnostico),
+             COLORS["accent2"], self.go_diagnostico),
             ("05", "Editar Funcionário",
              "Altera dados de login e senha de funcionários no banco",
-             COLORS["accent2"],  self.go_editar_func),
+             COLORS["accent2"], self.go_editar_func),
             ("06", "Implantar Mobile",
              "Configura e implanta o módulo mobile no servidor",
-             COLORS["accent2"],  self.go_implantar_mobile),
+             COLORS["accent2"], self.go_implantar_mobile),
             ("07", "Shutdown / Online",
              "Encerra ou coloca o sistema online remotamente",
-             COLORS["accent2"],  self.go_shutdown_online),
+             COLORS["accent2"], self.go_shutdown_online),
+            ("08", "Instalar Firebird",
+             "Baixa e instala o Firebird 3 ou 4 silenciosamente",
+             COLORS["accent2"], self.go_instalar_firebird),
+            ("09", "Verificar Versão .fdb",
+             "Detecta a versão do Firebird a partir de um arquivo .fdb",
+             COLORS["accent2"], self.go_verificar_versao_fdb),  # ← novo
         ]
 
         for num, title, desc, accent, sig in items:
