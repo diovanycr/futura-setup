@@ -4,6 +4,7 @@
 #   - Instalação / Remoção portable
 #   - Modo processo ou serviço Windows
 #   - Toggle ativar/inativar independente
+#   - Ativar uma versão desativa automaticamente a outra
 # Salvar em: ui/page_fb_portable.py
 # =============================================================================
 from __future__ import annotations
@@ -31,6 +32,7 @@ from core.fb_portable import (
     status_detalhado,
     is_admin, solicitar_admin,
     ativar_fb, inativar_fb,
+    alternar_versao_ativa,
     instalar_fb_portable,
     remover_fb_portable,
     fb_obter_modo,
@@ -89,7 +91,12 @@ class _ToggleSwitch(QAbstractButton):
 # Workers
 # =============================================================================
 
-class _AtivarWorker(QThread):
+class _AlternarWorker(QThread):
+    """
+    Worker principal de ativação.
+    - Se checked=True  → alternar_versao_ativa(versao): desativa a outra e ativa esta.
+    - Se checked=False → inativar_fb(versao): apenas desativa.
+    """
     log       = pyqtSignal(str)
     concluido = pyqtSignal(dict)
 
@@ -99,8 +106,12 @@ class _AtivarWorker(QThread):
         self.ativar = ativar
 
     def run(self):
-        fn = ativar_fb if self.ativar else inativar_fb
-        r  = fn(self.versao, self.log.emit)
+        if self.ativar:
+            r = alternar_versao_ativa(self.versao, self.log.emit)
+        else:
+            r = inativar_fb(self.versao, self.log.emit)
+            r.setdefault("versao", self.versao)
+
         r["versao"] = self.versao
         r["ativar"] = self.ativar
         self.concluido.emit(r)
@@ -182,7 +193,6 @@ class _ModoCard(QFrame):
         )
         lay.addWidget(titulo)
 
-        # Linha de status
         row = QHBoxLayout()
         row.setSpacing(8)
         self._dot = QWidget()
@@ -657,7 +667,8 @@ class PageFbPortable(QWidget):
             "Ambas as versões podem ser instaladas como portable e rodar como "
             "processo (ativo apenas com o Futura Setup aberto) ou como serviço "
             "Windows (start=auto, inicia com o Windows). "
-            "FB3 usa a porta 3050, FB4 usa a porta 3051.",
+            "FB3 usa a porta 3050, FB4 usa a porta 3051. "
+            "Ativar uma versão desativa automaticamente a outra.",
             COLORS["text_mid"], 11,
         )
         info.setWordWrap(True)
@@ -766,19 +777,37 @@ class PageFbPortable(QWidget):
         self._atualizar_status()
 
     # =========================================================================
-    # Toggles
+    # Toggles — alternância automática
     # =========================================================================
 
     def _on_toggle(self, versao: str, checked: bool):
         if self._upd_toggle:
             return
-        acao = "Ativando" if checked else "Inativando"
+
+        outra = "4" if versao == "3" else "3"
+
+        # Se está desativando e a outra não está ativa, apenas inativa
+        # Se está ativando, usa alternar_versao_ativa (para a outra automaticamente)
+        if checked:
+            lbl_alvo  = FB_CONFIGS[versao]["label"]
+            lbl_outra = FB_CONFIGS[outra]["label"]
+            st = status_detalhado()
+            outra_ativa = st[f"fb{outra}"]["rodando"]
+            if outra_ativa:
+                msg_console = (
+                    f"Ativando {lbl_alvo} e desativando {lbl_outra} automaticamente ..."
+                )
+            else:
+                msg_console = f"Ativando {lbl_alvo} ..."
+        else:
+            msg_console = f"Inativando {FB_CONFIGS[versao]['label']} ..."
+
         self._setar_ocupado(True)
         self._console.limpar()
         self._alert.setVisible(False)
-        self._console.append(f"{acao} {FB_CONFIGS[versao]['label']} ...")
+        self._console.append(msg_console)
 
-        worker = _AtivarWorker(versao, checked)
+        worker = _AlternarWorker(versao, checked)
         worker.log.connect(self._console.append)
         worker.concluido.connect(self._on_toggle_concluido)
         worker.finished.connect(lambda: self._limpar_worker(worker))
@@ -793,9 +822,24 @@ class PageFbPortable(QWidget):
         lbl    = FB_CONFIGS.get(versao, {}).get("label", f"FB{versao}")
         acao   = "ativado" if ativar else "inativado"
         if r.get("requer_admin"):
-            self._alerta("Permissao de administrador necessaria. Use o botão 'Reiniciar como Admin'.", "warn")
+            self._alerta(
+                "Permissao de administrador necessaria. Use o botão 'Reiniciar como Admin'.",
+                "warn"
+            )
         elif r["ok"]:
-            self._alerta(f"{lbl} {acao} com sucesso!", "success")
+            if ativar:
+                outra     = "4" if versao == "3" else "3"
+                lbl_outra = FB_CONFIGS[outra]["label"]
+                st        = status_detalhado()
+                if not st[f"fb{outra}"]["rodando"]:
+                    self._alerta(
+                        f"{lbl} ativado! {lbl_outra} foi desativado automaticamente.",
+                        "success"
+                    )
+                else:
+                    self._alerta(f"{lbl} {acao} com sucesso!", "success")
+            else:
+                self._alerta(f"{lbl} {acao} com sucesso!", "success")
         else:
             self._alerta(f"Erro: {r['erro']}", "error")
 
@@ -841,15 +885,21 @@ class PageFbPortable(QWidget):
         acao   = r.get("acao", "")
         lbl    = FB_CONFIGS.get(versao, {}).get("label", f"FB{versao}")
         if r.get("requer_admin"):
-            self._alerta("Permissao de administrador necessaria. Reinicie como Administrador.", "warn")
+            self._alerta(
+                "Permissao de administrador necessaria. Reinicie como Administrador.", "warn"
+            )
         elif r["ok"]:
             if acao == "registrar":
                 self._alerta(
-                    f"{lbl} registrado como serviço Windows! Inicia automaticamente com o Windows.",
+                    f"{lbl} registrado como serviço Windows! "
+                    "Inicia automaticamente com o Windows.",
                     "success"
                 )
             else:
-                self._alerta(f"Serviço Windows do {lbl} removido. Voltou ao modo processo.", "success")
+                self._alerta(
+                    f"Serviço Windows do {lbl} removido. Voltou ao modo processo.",
+                    "success"
+                )
         else:
             self._alerta(f"Erro: {r['erro']}", "error")
 
@@ -864,17 +914,15 @@ class PageFbPortable(QWidget):
         st = status_detalhado()
         self._upd_toggle = True
 
-        for versao in ("3", "4"):
-            d        = st[f"fb{versao}"]
-            inst     = d["instalado"]
-            # Toggle e badge refletem se está EFETIVAMENTE RODANDO,
-            # não apenas registrado/habilitado.
-            rodando  = d["rodando"]
-            row      = self._toggle_rows[versao]
-            card     = self._modo_cards[versao]
+        fb3_rod = st["fb3"]["rodando"]
+        fb4_rod = st["fb4"]["rodando"]
 
-            row.toggle.setAtivo(inst)
-            row.toggle.setChecked(rodando)
+        for versao in ("3", "4"):
+            d       = st[f"fb{versao}"]
+            inst    = d["instalado"]
+            rodando = d["rodando"]
+            row     = self._toggle_rows[versao]
+            card    = self._modo_cards[versao]
 
             porta = FB_CONFIGS[versao]['porta']
             if d["servico_rod"]:
@@ -888,11 +936,20 @@ class PageFbPortable(QWidget):
             else:
                 det = f"Processo portable  •  porta {porta}"
 
-            # Informar sobre serviço oficial do FB3
             if versao == "3" and d.get("servico_oficial_rod"):
                 det = f"Serviço oficial  •  porta {porta}  •  rodando"
 
             row.set_estado(rodando, inst, det)
+            row.toggle.setChecked(rodando)
+
+            # Todos os toggles ficam habilitados se instalados —
+            # a alternância automática elimina a necessidade de bloquear.
+            row.toggle.setAtivo(inst)
+            row.toggle.setToolTip(
+                "Ativar esta versão irá desativar a outra automaticamente."
+                if inst else ""
+            )
+
             card.atualizar(
                 instalado      = inst,
                 modo           = d["modo"],
@@ -902,9 +959,11 @@ class PageFbPortable(QWidget):
 
         self._upd_toggle = False
 
+        # Conflito só aparece se ambas subirem por algum meio externo
         if st["conflito"]:
             self._alerta(
-                "FB3 e FB4 estão ativos simultaneamente — isso pode causar conflitos.", "warn"
+                "FB3 e FB4 estão ativos simultaneamente — isso pode causar conflitos.",
+                "warn"
             )
 
         self._atualizar_card_status()

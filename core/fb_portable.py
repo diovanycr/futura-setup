@@ -4,11 +4,6 @@
 # FB3 → processo portable (porta 3050) OU serviço Windows registrado
 # FB4 → processo portable (porta 3051) OU serviço Windows registrado
 #
-# Ambas as versões funcionam de forma simétrica:
-#   - Instalação via download do zip do GitHub
-#   - Modo processo: inicia fbserver.exe/firebird.exe diretamente
-#   - Modo serviço:  registra como serviço Windows (start=auto)
-#
 # Salvar em: core/fb_portable.py
 # =============================================================================
 from __future__ import annotations
@@ -63,14 +58,13 @@ FB_CONFIGS = {
         "zip_size":     17 * 1024 * 1024,
         "porta":        3050,
         "label":        "Firebird 3 Portable",
-        # Serviços do instalador oficial do Windows (detecção/convivência)
+        "security_db":  "security3.fdb",
         "servicos_win_oficiais": [
             "FirebirdServerDefaultInstance",
             "FirebirdGuardianDefaultInstance",
             "FirebirdServer",
             "Firebird",
         ],
-        # Nome do serviço registrado pelo Futura Setup
         "servico_nome": "FuturaFirebirdFB3",
     },
     "4": {
@@ -82,23 +76,164 @@ FB_CONFIGS = {
         "zip_size":     23 * 1024 * 1024,
         "porta":        3051,
         "label":        "Firebird 4 Portable",
+        "security_db":  "security4.fdb",
         "servicos_win_oficiais": [],
         "servico_nome": "FuturaFirebirdFB4",
     },
 }
 
-# Atalhos legado
 FB4_DIR  = FB_CONFIGS["4"]["dir"]
 FB4_GFIX = os.path.join(FB4_DIR, "gfix.exe")
 FB4_GBAK = os.path.join(FB4_DIR, "gbak.exe")
 FB4_ISQL = os.path.join(FB4_DIR, "isql.exe")
 
-# Handles globais dos processos em modo portable
 _processos: dict[str, subprocess.Popen | None] = {"3": None, "4": None}
 
 _SERVIDOR_CANDIDATOS = ["firebird.exe", "fbserver.exe"]
 _INSTSVC_CANDIDATOS  = ["instsvc.exe"]
 _SERVIDOR_SUBDIRS    = ["", "bin"]
+
+
+# =============================================================================
+# Wrapper pywin32 para FB3
+# =============================================================================
+
+def _gerar_wrapper(versao: str, fbserver: str, log_fn=None) -> str | None:
+    """Gera fb_svc_wrapper.py no diretório do FB. Retorna o caminho ou None."""
+    def log(m):
+        if log_fn: log_fn(m)
+
+    cfg      = FB_CONFIGS[versao]
+    fb_dir   = cfg["dir"]
+    svc_name = cfg["servico_nome"]
+    svc_lbl  = cfg["label"]
+    fbdir    = os.path.dirname(fbserver)
+
+    fbserver_esc = fbserver.replace("\\", "\\\\")
+    fbdir_esc    = fbdir.replace("\\", "\\\\")
+
+    linhas = [
+        "# AUTO-GERADO pelo Futura Setup --- NAO EDITE MANUALMENTE",
+        "# Wrapper pywin32: roda fbserver.exe como servico Windows nativo.",
+        "import subprocess, sys, os",
+        "import win32serviceutil, win32service, win32event, servicemanager",
+        "",
+        "FBSERVER_EXE = r'" + fbserver_esc + "'",
+        "FBSERVER_DIR = r'" + fbdir_esc    + "'",
+        "SVC_NAME     = '" + svc_name      + "'",
+        "SVC_LABEL    = '" + svc_lbl       + "'",
+        "",
+        "",
+        "class FirebirdPortableSvc(win32serviceutil.ServiceFramework):",
+        "    _svc_name_         = SVC_NAME",
+        "    _svc_display_name_ = SVC_LABEL",
+        "    _svc_description_  = 'Firebird Portable gerenciado pelo Futura Setup'",
+        "",
+        "    def __init__(self, args):",
+        "        win32serviceutil.ServiceFramework.__init__(self, args)",
+        "        self._stop_event = win32event.CreateEvent(None, 0, 0, None)",
+        "        self._proc = None",
+        "",
+        "    def SvcStop(self):",
+        "        self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)",
+        "        if self._proc and self._proc.poll() is None:",
+        "            try:",
+        "                self._proc.terminate()",
+        "                self._proc.wait(timeout=10)",
+        "            except Exception:",
+        "                pass",
+        "        win32event.SetEvent(self._stop_event)",
+        "",
+        "    def SvcDoRun(self):",
+        "        servicemanager.LogMsg(",
+        "            servicemanager.EVENTLOG_INFORMATION_TYPE,",
+        "            servicemanager.PYS_SERVICE_STARTING,",
+        "            (self._svc_name_, ''),",
+        "        )",
+        "        self._proc = subprocess.Popen(",
+        "            [FBSERVER_EXE, '-a'],",
+        "            cwd=FBSERVER_DIR,",
+        "            stdout=subprocess.DEVNULL,",
+        "            stderr=subprocess.DEVNULL,",
+        "        )",
+        "        servicemanager.LogMsg(",
+        "            servicemanager.EVENTLOG_INFORMATION_TYPE,",
+        "            servicemanager.PYS_SERVICE_STARTED,",
+        "            (self._svc_name_, ''),",
+        "        )",
+        "        while True:",
+        "            rc = win32event.WaitForSingleObject(self._stop_event, 2000)",
+        "            if rc == win32event.WAIT_OBJECT_0:",
+        "                break",
+        "            if self._proc.poll() is not None:",
+        "                servicemanager.LogErrorMsg(",
+        "                    SVC_NAME + ': fbserver.exe encerrou inesperadamente.'",
+        "                )",
+        "                break",
+        "",
+        "",
+        "if __name__ == '__main__':",
+        "    win32serviceutil.HandleCommandLine(FirebirdPortableSvc)",
+        "",
+    ]
+
+    conteudo     = "\n".join(linhas)
+    wrapper_path = os.path.join(fb_dir, "fb_svc_wrapper.py")
+    try:
+        with open(wrapper_path, "w", encoding="utf-8") as f:
+            f.write(conteudo)
+        log(f"  Wrapper gerado: {wrapper_path}")
+        return wrapper_path
+    except Exception as e:
+        log(f"  ERRO ao gerar wrapper: {e}")
+        return None
+
+
+def _pywin32_disponivel() -> bool:
+    try:
+        import win32serviceutil  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def _wrapper_path(versao: str) -> str:
+    return os.path.join(FB_CONFIGS[versao]["dir"], "fb_svc_wrapper.py")
+
+
+def _servico_binpath_valido(versao: str) -> bool:
+    """
+    Verifica se o binPath do serviço registrado aponta para o diretório
+    correto da versão. Impede que FB3 e FB4 compartilhem o mesmo serviço.
+    """
+    nome   = FB_CONFIGS[versao]["servico_nome"]
+    fb_dir = FB_CONFIGS[versao]["dir"].lower()
+    try:
+        r = subprocess.run(
+            ["sc", "qc", nome],
+            capture_output=True, text=True,
+            encoding="utf-8", errors="ignore", timeout=5,
+        )
+        bin_path = ""
+        for linha in (r.stdout + r.stderr).splitlines():
+            l = linha.strip()
+            if any(k in l.upper() for k in [
+                "BINARY_PATH_NAME", "CAMINHO_DO_BINARIO", "CAMINHO_DO_BIN"
+            ]):
+                partes = l.split(":", 1)
+                if len(partes) == 2:
+                    bin_path = partes[1].strip().lower()
+                break
+        if not bin_path:
+            return False
+        if fb_dir not in bin_path:
+            return False
+        if versao == "3":
+            return "fb_svc_wrapper.py" in bin_path
+        else:
+            return "fbserver.exe" in bin_path or "firebird.exe" in bin_path
+    except Exception:
+        return False
 
 
 # =============================================================================
@@ -121,7 +256,6 @@ def _encontrar_servidor(versao: str) -> str | None:
 
 
 def _encontrar_instsvc(versao: str) -> str | None:
-    """Localiza instsvc.exe — utilitário oficial do Firebird para gerenciar serviço Windows."""
     return _encontrar_exe(versao, _INSTSVC_CANDIDATOS)
 
 
@@ -133,12 +267,17 @@ def _encontrar_gbak(versao: str) -> str | None:
     return _encontrar_exe(versao, ["gbak.exe"])
 
 
+def _encontrar_isql(versao: str) -> str | None:
+    return _encontrar_exe(versao, ["isql.exe"])
+
+
 def diagnosticar_instalacao(versao: str = "4") -> dict:
     fb_dir = FB_CONFIGS[versao]["dir"]
     resultado = {
         "dir":      fb_dir,
         "dir_ok":   os.path.isdir(fb_dir),
         "servidor": _encontrar_servidor(versao),
+        "instsvc":  _encontrar_instsvc(versao),
         "gfix":     _encontrar_gfix(versao),
         "gbak":     _encontrar_gbak(versao),
         "arquivos": [],
@@ -163,13 +302,8 @@ def diagnosticar_instalacao(versao: str = "4") -> dict:
 def fb_portable_instalado(versao: str = "4") -> bool:
     return _encontrar_gfix(versao) is not None
 
-
-def fb4_portable_instalado() -> bool:
-    return fb_portable_instalado("4")
-
-
-def fb3_portable_instalado() -> bool:
-    return fb_portable_instalado("3")
+def fb4_portable_instalado() -> bool: return fb_portable_instalado("4")
+def fb3_portable_instalado() -> bool: return fb_portable_instalado("3")
 
 
 def versao_fb_portable(versao: str = "4") -> str:
@@ -185,13 +319,134 @@ def versao_fb_portable(versao: str = "4") -> str:
     except Exception:
         return f"{versao}.x"
 
+def versao_fb4_portable() -> str: return versao_fb_portable("4")
+def versao_fb3_portable() -> str: return versao_fb_portable("3")
 
-def versao_fb4_portable() -> str:
-    return versao_fb_portable("4")
+
+# =============================================================================
+# Inicialização do Security Database
+# =============================================================================
+
+def _security_db_path(versao: str) -> str | None:
+    """Retorna o caminho do security database da versão, ou None se não encontrado."""
+    cfg    = FB_CONFIGS[versao]
+    fb_dir = cfg["dir"]
+    nome   = cfg["security_db"]
+    for subdir in _SERVIDOR_SUBDIRS:
+        base = os.path.join(fb_dir, subdir) if subdir else fb_dir
+        p    = os.path.join(base, nome)
+        if os.path.isfile(p):
+            return p
+    return None
 
 
-def versao_fb3_portable() -> str:
-    return versao_fb_portable("3")
+def _security_db_inicializado(versao: str) -> bool:
+    """
+    Verifica se o security database existe e tem tamanho razoável (>= 64 KB).
+    Um arquivo menor indica que foi criado vazio / corrompido.
+    """
+    p = _security_db_path(versao)
+    if not p:
+        return False
+    try:
+        return os.path.getsize(p) >= 64 * 1024
+    except Exception:
+        return False
+
+
+def inicializar_security_db(versao: str, log_fn=None) -> bool:
+    """
+    Inicializa o security database do Firebird portable via 'firebird.exe -i'.
+    Necessário em instalações via zip (sem o instalador oficial).
+
+    Estratégia:
+      1. Sobe o servidor em modo embedded/application temporariamente
+      2. Aguarda o security DB ser criado
+      3. Encerra o processo temporário
+
+    Retorna True se o security DB ficou ok.
+    """
+    def log(m):
+        if log_fn: log_fn(m)
+
+    if _security_db_inicializado(versao):
+        log(f"  Security database FB{versao} já inicializado.")
+        return True
+
+    servidor = _encontrar_servidor(versao)
+    if not servidor:
+        log(f"  ERRO: servidor FB{versao} não encontrado para inicializar security DB.")
+        return False
+
+    fb_dir   = os.path.dirname(servidor)
+    cfg      = FB_CONFIGS[versao]
+    sec_nome = cfg["security_db"]
+
+    log(f"  Inicializando security database ({sec_nome}) ...")
+
+    # Tenta via 'firebird.exe -i' (inicializa o DB de segurança e encerra)
+    try:
+        r = subprocess.run(
+            [servidor, "-i"],
+            cwd=fb_dir,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="ignore",
+            timeout=30,
+        )
+        saida = (r.stdout + r.stderr).strip()
+        if saida:
+            log(f"    firebird -i: {saida[:300]}")
+    except subprocess.TimeoutExpired:
+        log("    firebird -i timeout — continuando...")
+    except Exception as e:
+        log(f"    firebird -i erro: {e}")
+
+    # Aguarda até 10s o arquivo aparecer com tamanho adequado
+    for _ in range(10):
+        time.sleep(1)
+        if _security_db_inicializado(versao):
+            log(f"  Security database inicializado com sucesso.")
+            return True
+
+    # Fallback: sobe como processo application (-a) temporariamente
+    # para forçar a criação do security DB no primeiro boot
+    log("  Fallback: subindo servidor temporariamente para criar security DB ...")
+    try:
+        proc_tmp = subprocess.Popen(
+            [servidor, "-a"],
+            cwd=fb_dir,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        for _ in range(15):
+            time.sleep(1)
+            if _security_db_inicializado(versao):
+                log("  Security database criado pelo servidor temporário.")
+                try:
+                    proc_tmp.terminate()
+                    proc_tmp.wait(timeout=5)
+                except Exception:
+                    pass
+                return True
+        try:
+            proc_tmp.terminate()
+            proc_tmp.wait(timeout=5)
+        except Exception:
+            pass
+    except Exception as e:
+        log(f"  Fallback erro: {e}")
+
+    # Última tentativa: verifica se o arquivo existe (mesmo pequeno)
+    p = _security_db_path(versao)
+    if p and os.path.isfile(p):
+        sz = os.path.getsize(p)
+        log(f"  Security database existe ({sz} bytes) — pode estar incompleto.")
+        return sz > 0
+
+    log("  AVISO: não foi possível inicializar o security database.")
+    return False
 
 
 # =============================================================================
@@ -242,7 +497,6 @@ def _servico_iniciar(nome: str, log_fn=None, timeout_s: int = 45) -> bool:
             time.sleep(1)
             if _servico_rodando(nome):
                 return True
-        # Serviço não subiu — pega estado atual e últimas entradas do Event Log
         try:
             sq = subprocess.run(["sc", "query", nome],
                                 capture_output=True, text=True, timeout=5)
@@ -252,10 +506,10 @@ def _servico_iniciar(nome: str, log_fn=None, timeout_s: int = 45) -> bool:
         try:
             ev = subprocess.run(
                 ["powershell", "-NoProfile", "-Command",
-                 f"Get-EventLog -LogName System -Source '*Firebird*','*Service*' "
-                 f"-Newest 5 -ErrorAction SilentlyContinue | "
-                 f"Select-Object TimeGenerated,EntryType,Message | "
-                 f"Format-List"],
+                 "Get-EventLog -LogName System -Source '*Firebird*','*Service*' "
+                 "-Newest 5 -ErrorAction SilentlyContinue | "
+                 "Select-Object TimeGenerated,EntryType,Message | "
+                 "Format-List"],
                 capture_output=True, text=True,
                 encoding="utf-8", errors="ignore", timeout=10,
             )
@@ -264,7 +518,7 @@ def _servico_iniciar(nome: str, log_fn=None, timeout_s: int = 45) -> bool:
         except Exception:
             pass
     except subprocess.TimeoutExpired:
-        log(f"  net start timeout ({timeout_s}s) — servico pode estar travado na inicializacao.")
+        log(f"  net start timeout ({timeout_s}s).")
     except Exception as e:
         log(f"Erro ao iniciar servico '{nome}': {e}")
     return False
@@ -285,7 +539,7 @@ def _servico_parar(nome: str, log_fn=None, timeout_s: int = 30) -> bool:
 
 
 # =============================================================================
-# Serviço oficial do instalador Windows — FB3 (detecção e convivência)
+# Serviço oficial FB3
 # =============================================================================
 
 def _nome_servico_oficial_fb3() -> str | None:
@@ -294,14 +548,13 @@ def _nome_servico_oficial_fb3() -> str | None:
             return nome
     return None
 
-
 def fb3_servico_oficial_rodando() -> bool:
     nome = _nome_servico_oficial_fb3()
     return _servico_rodando(nome) if nome else False
 
 
 # =============================================================================
-# Modo de execução (processo | serviço) — genérico FB3 e FB4
+# Modo de execução
 # =============================================================================
 
 def _modo_path(versao: str) -> str:
@@ -309,9 +562,7 @@ def _modo_path(versao: str) -> str:
 
 
 def fb_obter_modo(versao: str) -> str:
-    """Retorna 'processo' (padrão) ou 'servico'."""
-    nome_svc = FB_CONFIGS[versao]["servico_nome"]
-    if _servico_existe(nome_svc):
+    if _servico_existe(FB_CONFIGS[versao]["servico_nome"]):
         return "servico"
     try:
         path = _modo_path(versao)
@@ -333,7 +584,7 @@ def _fb_salvar_modo(versao: str, modo: str):
 
 
 # =============================================================================
-# Flag habilitado/desabilitado (modo processo)
+# Flag habilitado/desabilitado
 # =============================================================================
 
 def _flag_path(versao: str) -> str:
@@ -359,12 +610,11 @@ def _salvar_flag(versao: str, habilitado: bool):
 
 
 # =============================================================================
-# Serviço Windows Futura — genérico FB3 e FB4
+# Serviço Windows Futura
 # =============================================================================
 
 def fb_servico_existe(versao: str) -> bool:
     return _servico_existe(FB_CONFIGS[versao]["servico_nome"])
-
 
 def fb_servico_rodando(versao: str) -> bool:
     return _servico_rodando(FB_CONFIGS[versao]["servico_nome"])
@@ -373,7 +623,11 @@ def fb_servico_rodando(versao: str) -> bool:
 def registrar_fb_servico(versao: str, log_fn=None) -> dict:
     """
     Registra o Firebird portable como serviço Windows (start=auto).
-    Requer privilégios de administrador.
+
+    Estratégia por versão:
+      FB3 → wrapper pywin32 (garante nome customizado)
+      FB4 → sc create direto com firebird.exe -s
+             (instsvc.exe ignorado: sempre cria 'FirebirdServerDefaultInstance')
     """
     def log(m):
         if log_fn: log_fn(m)
@@ -384,7 +638,7 @@ def registrar_fb_servico(versao: str, log_fn=None) -> dict:
         return {"ok": False, "erro": msg, "requer_admin": True}
 
     if not fb_portable_instalado(versao):
-        msg = f"FB{versao} Portable nao esta instalado. Instale-o primeiro."
+        msg = f"FB{versao} Portable nao esta instalado."
         log(f"ERRO: {msg}")
         return {"ok": False, "erro": msg}
 
@@ -397,122 +651,102 @@ def registrar_fb_servico(versao: str, log_fn=None) -> dict:
     cfg     = FB_CONFIGS[versao]
     nome    = cfg["servico_nome"]
     label_v = cfg["label"]
+    instsvc = _encontrar_instsvc(versao)
 
-    # Parar processo portable se estiver rodando
+    log(f"Diagnostico FB{versao}:")
+    log(f"  servidor : {servidor}")
+    log(f"  instsvc  : {instsvc if instsvc else 'NAO ENCONTRADO'}")
+    log(f"  fb_dir   : {cfg['dir']}")
+    log(f"  pywin32  : {'disponivel' if _pywin32_disponivel() else 'NAO DISPONIVEL'}")
+
     if _processo_rodando(versao):
-        log(f"Parando processo portable do FB{versao} antes de registrar servico ...")
+        log(f"Parando processo portable do FB{versao} ...")
         _parar_processo(versao, log_fn)
 
-    # Para FB3: parar serviço oficial se estiver rodando (conflito de porta)
     if versao == "3":
         nome_oficial = _nome_servico_oficial_fb3()
         if nome_oficial and _servico_rodando(nome_oficial):
-            log(f"Parando servico oficial do FB3 ('{nome_oficial}') para evitar conflito de porta ...")
+            log(f"Parando servico oficial FB3 ('{nome_oficial}') ...")
             _servico_parar(nome_oficial, log_fn)
 
-    # Remover serviço Futura anterior se existir
     if _servico_existe(nome):
-        log(f"Servico '{nome}' ja existe — recriando ...")
+        log(f"Removendo servico anterior '{nome}' ...")
         _remover_servico_interno(versao, log_fn)
 
     log(f"Registrando servico '{nome}' ({label_v}) ...")
     log(f"  Executavel: {servidor}")
-    fb_dir = os.path.dirname(servidor)
 
     try:
         registrado = False
 
-        # ── Estratégia 1: instsvc.exe (utilitário oficial do Firebird) ──────────
-        # instsvc install [-auto] [-n NomeServico] [-p Porta]
-        instsvc = _encontrar_instsvc(versao)
-        if instsvc:
-            log(f"  Usando instsvc.exe: {instsvc}")
-            porta = str(cfg["porta"])
+        if versao == "4":
+            # ── FB4: sc create direto ────────────────────────────────────────
+            # Não usa instsvc.exe: ele sempre cria 'FirebirdServerDefaultInstance'
+            # conflitando com o serviço do FB3.
+            log("  FB4: sc create com firebird.exe (nome controlado pelo Futura)")
+            fbexe    = _encontrar_exe(versao, ["firebird.exe"]) \
+                    or _encontrar_exe(versao, ["fbserver.exe"]) \
+                    or servidor
+            bin_path = f'"{fbexe}" -s'
             r = subprocess.run(
-                [instsvc, "install", "-auto", "-n", nome, "-p", porta],
-                capture_output=True, text=True,
-                encoding="utf-8", errors="ignore",
-                timeout=30, cwd=fb_dir,
-            )
-            saida = (r.stdout + r.stderr).strip()
-            if saida:
-                log(f"    instsvc: {saida[:300]}")
-            if _servico_existe(nome):
-                registrado = True
-                log("  Registrado via instsvc.exe.")
-            else:
-                # Tenta sem -n (cria com nome padrão do Firebird)
-                r2 = subprocess.run(
-                    [instsvc, "install", "-auto", "-p", porta],
-                    capture_output=True, text=True,
-                    encoding="utf-8", errors="ignore",
-                    timeout=30, cwd=fb_dir,
-                )
-                saida2 = (r2.stdout + r2.stderr).strip()
-                if saida2:
-                    log(f"    instsvc (sem -n): {saida2[:300]}")
-                # Detecta nome criado
-                for candidato in [nome, "DefaultInstance",
-                                   "FirebirdDefaultInstance",
-                                   "FirebirdServerDefaultInstance", "Firebird"]:
-                    if _servico_existe(candidato):
-                        if candidato != nome:
-                            log(f"  Servico criado como '{candidato}'.")
-                            FB_CONFIGS[versao]["servico_nome"] = candidato
-                            nome = candidato
-                        registrado = True
-                        log("  Registrado via instsvc.exe (nome padrao).")
-                        break
-        else:
-            log("  instsvc.exe nao encontrado no diretorio do Firebird.")
-
-        # ── Estratégia 2: sc create com binPath apontando para fbserver.exe ──────
-        # Usa fbserver.exe que SIM aceita rodar como serviço Windows nativo,
-        # diferente de firebird.exe (que é o app de console/modo processo).
-        if not registrado:
-            fbserver = _encontrar_exe(versao, ["fbserver.exe"])
-            exe_svc  = fbserver if fbserver else servidor
-            log(f"  sc create com: {exe_svc}")
-            r3 = subprocess.run(
                 [
                     "sc", "create", nome,
-                    "binPath=", f'"{exe_svc}" -s',
-                    "DisplayName=", f"Futura {label_v}",
-                    "start=", "auto",
-                    "type=", "own",
+                    f"binPath={bin_path}",
+                    f"DisplayName=Futura {label_v}",
+                    "start=auto",
+                    "type=own",
                 ],
                 capture_output=True, text=True,
                 encoding="utf-8", errors="ignore", timeout=15,
             )
-            saida3 = (r3.stdout + r3.stderr).strip()
-            if saida3:
-                log(f"  sc create: {saida3[:300]}")
-            if r3.returncode == 0 and _servico_existe(nome):
+            saida = (r.stdout + r.stderr).strip()
+            if saida:
+                log(f"  sc create: {saida[:300]}")
+            if r.returncode == 0 and _servico_existe(nome):
                 registrado = True
-                log("  Registrado via sc create.")
+                log(f"  Registrado via sc create (FB4) com nome '{nome}'.")
             else:
                 return {"ok": False, "erro": (
-                    f"Nao foi possivel registrar o servico. "
-                    f"instsvc.exe {'nao encontrado' if not instsvc else 'falhou'}. "
-                    f"sc create: {saida3}"
+                    f"Nao foi possivel registrar o servico FB4. "
+                    f"sc create rc={r.returncode}: {saida}"
                 )}
 
-        if not _servico_existe(nome):
-            return {"ok": False, "erro": "Servico nao foi criado. Verifique o log."}
+        else:
+            # ── FB3: wrapper pywin32 ─────────────────────────────────────────
+            log("  FB3: wrapper pywin32")
+            res = _registrar_fb3_via_wrapper(nome, label_v, servidor, log_fn)
+            if res["ok"]:
+                registrado = True
+                nome = FB_CONFIGS[versao]["servico_nome"]
+            else:
+                if instsvc:
+                    log("  Fallback FB3: instsvc.exe")
+                    r = subprocess.run(
+                        [instsvc, "install", "-auto", "-n", nome],
+                        capture_output=True, text=True,
+                        encoding="utf-8", errors="ignore",
+                        timeout=30, cwd=os.path.dirname(servidor),
+                    )
+                    saida = (r.stdout + r.stderr).strip()
+                    if saida:
+                        log(f"    instsvc: {saida[:300]}")
+                    if _servico_existe(nome):
+                        registrado = True
+                        log("  Registrado via instsvc.exe (fallback).")
+                if not registrado:
+                    return res
 
-        # Garante start=auto, descrição e recovery
-        subprocess.run(["sc", "config", nome, "start=", "auto"],
+        if not _servico_existe(nome):
+            return {"ok": False, "erro": "Servico nao foi criado."}
+
+        subprocess.run(["sc", "config",      nome, "start=", "auto"],
                        capture_output=True, timeout=10)
-        subprocess.run(
-            ["sc", "description", nome,
-             f"Firebird {versao} Portable gerenciado pelo Futura Setup"],
-            capture_output=True, timeout=10,
-        )
-        subprocess.run(
-            ["sc", "failure", nome, "reset=", "86400",
-             "actions=", "restart/5000/restart/10000//0"],
-            capture_output=True, timeout=10,
-        )
+        subprocess.run(["sc", "description", nome,
+                        f"Firebird {versao} Portable gerenciado pelo Futura Setup"],
+                       capture_output=True, timeout=10)
+        subprocess.run(["sc", "failure", nome, "reset=", "86400",
+                        "actions=", "restart/5000/restart/10000//0"],
+                       capture_output=True, timeout=10)
 
         _fb_salvar_modo(versao, "servico")
         log(f"Servico '{nome}' registrado com sucesso (start=auto, porta {cfg['porta']}).")
@@ -523,18 +757,94 @@ def registrar_fb_servico(versao: str, log_fn=None) -> dict:
         return {"ok": False, "erro": str(e)}
 
 
+def _registrar_fb3_via_wrapper(nome: str, label_v: str, servidor: str, log_fn=None) -> dict:
+    """Registra FB3 como serviço Windows usando wrapper pywin32."""
+    def log(m):
+        if log_fn: log_fn(m)
+
+    if not _pywin32_disponivel():
+        msg = ("pywin32 nao disponivel. "
+               "Instale: pip install pywin32 && python -m pywin32_postinstall -install")
+        log(f"ERRO: {msg}")
+        return {"ok": False, "erro": msg}
+
+    wrapper_path = _gerar_wrapper("3", servidor, log_fn)
+    if not wrapper_path:
+        return {"ok": False, "erro": "Falha ao gerar wrapper pywin32."}
+
+    python_exe = sys.executable
+    log(f"  Python exe: {python_exe}")
+    log(f"  Wrapper   : {wrapper_path}")
+
+    log("  Instalando via HandleCommandLine ...")
+    try:
+        r = subprocess.run(
+            [python_exe, wrapper_path, "--startup", "auto", "install"],
+            capture_output=True, text=True,
+            encoding="utf-8", errors="ignore", timeout=30,
+        )
+        saida = (r.stdout + r.stderr).strip()
+        if saida:
+            log(f"    wrapper install: {saida[:300]}")
+        if _servico_existe(nome):
+            log("  Registrado via HandleCommandLine.")
+            return {"ok": True, "erro": ""}
+    except Exception as e:
+        log(f"  HandleCommandLine falhou: {e}")
+
+    log("  Fallback: sc create com python.exe + wrapper ...")
+    bin_path = f'"{python_exe}" "{wrapper_path}"'
+    r2 = subprocess.run(
+        [
+            "sc", "create", nome,
+            f"binPath={bin_path}",
+            f"DisplayName=Futura {label_v}",
+            "start=auto",
+            "type=own",
+        ],
+        capture_output=True, text=True,
+        encoding="utf-8", errors="ignore", timeout=15,
+    )
+    saida2 = (r2.stdout + r2.stderr).strip()
+    if saida2:
+        log(f"  sc create: {saida2[:300]}")
+    if r2.returncode == 0 and _servico_existe(nome):
+        log("  Registrado via sc create + wrapper pywin32.")
+        return {"ok": True, "erro": ""}
+
+    return {"ok": False, "erro": (
+        f"Nao foi possivel registrar FB3 via wrapper. "
+        f"sc create rc={r2.returncode}: {saida2}"
+    )}
+
+
 def _remover_servico_interno(versao: str, log_fn=None) -> bool:
-    """Remove o serviço Windows Futura da versão. Uso interno."""
     def log(m):
         if log_fn: log_fn(m)
 
     nome = FB_CONFIGS[versao]["servico_nome"]
-
     if _servico_rodando(nome):
         subprocess.run(["net", "stop", nome], capture_output=True, timeout=30)
         time.sleep(2)
 
-    # Tenta instsvc remove primeiro (mais limpo)
+    wp = _wrapper_path(versao)
+    if versao == "3" and os.path.isfile(wp) and _pywin32_disponivel():
+        try:
+            r = subprocess.run(
+                [sys.executable, wp, "remove"],
+                capture_output=True, text=True,
+                encoding="utf-8", errors="ignore", timeout=15,
+            )
+            saida = (r.stdout + r.stderr).strip()
+            if saida:
+                log(f"  wrapper remove: {saida[:200]}")
+            if not _servico_existe(nome):
+                log(f"Servico '{nome}' removido via wrapper.")
+                time.sleep(1)
+                return True
+        except Exception as e:
+            log(f"  wrapper remove falhou: {e}")
+
     instsvc = _encontrar_instsvc(versao)
     if instsvc and _servico_existe(nome):
         r = subprocess.run(
@@ -551,40 +861,29 @@ def _remover_servico_interno(versao: str, log_fn=None) -> bool:
             time.sleep(1)
             return True
 
-    # Fallback: sc delete
     if not _servico_existe(nome):
         return True
-    r2 = subprocess.run(["sc", "delete", nome],
-                        capture_output=True, text=True, timeout=15)
+    r2 = subprocess.run(["sc", "delete", nome], capture_output=True, text=True, timeout=15)
     if r2.returncode == 0:
         log(f"Servico '{nome}' removido.")
         time.sleep(1)
         return True
-    else:
-        log(f"AVISO ao remover servico: {(r2.stdout + r2.stderr).strip()}")
-        return False
+    log(f"AVISO ao remover: {(r2.stdout + r2.stderr).strip()}")
+    return False
 
 
 def remover_fb_servico(versao: str, log_fn=None) -> dict:
-    """
-    Remove o registro do serviço Windows Futura da versão.
-    Volta ao modo processo portable.
-    Requer privilégios de administrador.
-    """
     def log(m):
         if log_fn: log_fn(m)
-
     if not is_admin():
         msg = "Permissao de administrador necessaria."
         log(f"ERRO: {msg}")
         return {"ok": False, "erro": msg, "requer_admin": True}
-
     nome = FB_CONFIGS[versao]["servico_nome"]
     if not _servico_existe(nome):
         log("Servico nao estava registrado.")
         _fb_salvar_modo(versao, "processo")
         return {"ok": True, "erro": ""}
-
     log(f"Removendo servico '{nome}' ...")
     ok = _remover_servico_interno(versao, log_fn)
     if ok:
@@ -596,19 +895,21 @@ def remover_fb_servico(versao: str, log_fn=None) -> dict:
 
 def ativar_fb_servico(versao: str, log_fn=None) -> dict:
     """
-    Inicia o serviço Windows Futura da versão.
-    Se não estiver registrado, registra e inicia.
-    Requer privilégios de administrador.
+    Inicia o serviço Windows Futura.
+    Garante que o security database está inicializado antes de subir.
     """
     def log(m):
         if log_fn: log_fn(m)
-
     if not is_admin():
         msg = "Permissao de administrador necessaria."
         log(f"ERRO: {msg}")
         return {"ok": False, "erro": msg, "requer_admin": True}
 
-    # Lê o nome após possível alteração por registrar_fb_servico
+    # ── Garante security database inicializado ────────────────────────────
+    log(f"Verificando security database do FB{versao} ...")
+    inicializar_security_db(versao, log_fn)
+    # ─────────────────────────────────────────────────────────────────────
+
     nome = FB_CONFIGS[versao]["servico_nome"]
 
     if not _servico_existe(nome):
@@ -616,13 +917,19 @@ def ativar_fb_servico(versao: str, log_fn=None) -> dict:
         r = registrar_fb_servico(versao, log_fn)
         if not r["ok"]:
             return r
-        # Re-lê nome pois registrar pode ter ajustado FB_CONFIGS
         nome = FB_CONFIGS[versao]["servico_nome"]
+    elif not _servico_binpath_valido(versao):
+        log(f"Servico '{nome}' com binPath incompativel ou apontando para versao errada. Recriando ...")
+        r = registrar_fb_servico(versao, log_fn)
+        if not r["ok"]:
+            return r
+        nome = FB_CONFIGS[versao]["servico_nome"]
+    else:
+        log(f"Servico '{nome}' com binPath valido — prosseguindo.")
 
     if _servico_desabilitado(nome):
         log(f"Habilitando servico '{nome}' ...")
-        subprocess.run(["sc", "config", nome, "start=", "auto"],
-                       capture_output=True, timeout=10)
+        subprocess.run(["sc", "config", nome, "start=", "auto"], capture_output=True, timeout=10)
 
     if _servico_rodando(nome):
         log(f"Servico '{nome}' ja esta rodando.")
@@ -638,27 +945,19 @@ def ativar_fb_servico(versao: str, log_fn=None) -> dict:
 
 
 def inativar_fb_servico(versao: str, log_fn=None) -> dict:
-    """
-    Para o serviço Windows Futura da versão (mantém registrado, apenas para).
-    Requer privilégios de administrador.
-    """
     def log(m):
         if log_fn: log_fn(m)
-
     if not is_admin():
         msg = "Permissao de administrador necessaria."
         log(f"ERRO: {msg}")
         return {"ok": False, "erro": msg, "requer_admin": True}
-
     nome = FB_CONFIGS[versao]["servico_nome"]
     if not _servico_existe(nome):
-        log("Servico nao estava registrado.")
+        log(f"Servico Futura '{nome}' nao estava registrado.")
         return {"ok": True, "erro": ""}
-
     if not _servico_rodando(nome):
         log(f"Servico '{nome}' ja estava parado.")
         return {"ok": True, "erro": ""}
-
     log(f"Parando servico '{nome}' ...")
     if _servico_parar(nome, log_fn):
         log("Servico parado com sucesso.")
@@ -668,7 +967,6 @@ def inativar_fb_servico(versao: str, log_fn=None) -> dict:
     return {"ok": False, "erro": msg}
 
 
-# Atalhos nomeados por versão
 def registrar_fb3_servico(log_fn=None) -> dict: return registrar_fb_servico("3", log_fn)
 def registrar_fb4_servico(log_fn=None) -> dict: return registrar_fb_servico("4", log_fn)
 def remover_fb3_servico(log_fn=None)   -> dict: return remover_fb_servico("3", log_fn)
@@ -682,7 +980,7 @@ def fb4_obter_modo()      -> str:  return fb_obter_modo("4")
 
 
 # =============================================================================
-# Processo portable — genérico FB3 e FB4
+# Processo portable
 # =============================================================================
 
 def _processo_rodando(versao: str) -> bool:
@@ -708,7 +1006,6 @@ def _processo_rodando(versao: str) -> bool:
 def _parar_processo(versao: str, log_fn=None):
     def log(m):
         if log_fn: log_fn(m)
-
     proc = _processos.get(versao)
     if proc is not None and proc.poll() is None:
         try:
@@ -718,7 +1015,6 @@ def _parar_processo(versao: str, log_fn=None):
             log(f"Processo portable FB{versao} encerrado.")
         except Exception:
             pass
-
     if _processo_rodando(versao):
         fb_dir = FB_CONFIGS[versao]["dir"].replace("\\", "\\\\")
         for nome_exe in _SERVIDOR_CANDIDATOS:
@@ -744,25 +1040,50 @@ def fb_habilitado(versao: str) -> bool:
 
 
 # =============================================================================
-# Ativar / Inativar — genérico FB3 e FB4
+# Ativar / Inativar
 # =============================================================================
 
+def _outra_versao_rodando(versao: str) -> bool:
+    """
+    Retorna True se a versão oposta estiver ativa por qualquer meio:
+    processo portable, serviço Futura ou serviço oficial do FB3.
+    """
+    outra = "4" if versao == "3" else "3"
+    if _processo_rodando(outra):
+        return True
+    if _servico_rodando(FB_CONFIGS[outra]["servico_nome"]):
+        return True
+    if outra == "3":
+        nome_oficial = _nome_servico_oficial_fb3()
+        if nome_oficial and _servico_rodando(nome_oficial):
+            return True
+    return False
+
+
 def ativar_fb(versao: str, log_fn=None) -> dict:
-    """
-    Ativa o Firebird da versão indicada.
-    Detecta automaticamente o modo (processo | serviço).
-    """
     def log(m):
         if log_fn: log_fn(m)
+
+    # ── Bloqueio: impede ativar se a outra versão já estiver rodando ──────
+    if _outra_versao_rodando(versao):
+        outra     = "4" if versao == "3" else "3"
+        outra_lbl = FB_CONFIGS[outra]["label"]
+        esta_lbl  = FB_CONFIGS[versao]["label"]
+        msg = (
+            f"{outra_lbl} está ativo. "
+            f"Inative-o antes de ativar o {esta_lbl}."
+        )
+        log(f"BLOQUEADO: {msg}")
+        return {"ok": False, "erro": msg}
+    # ─────────────────────────────────────────────────────────────────────
 
     modo = fb_obter_modo(versao)
     if modo == "servico":
         log(f"Modo servico Windows detectado para FB{versao}.")
         return ativar_fb_servico(versao, log_fn)
 
-    # ── Modo processo portable ──────────────────────────────────────────────
     if not fb_portable_instalado(versao):
-        msg = f"FB{versao} Portable nao esta instalado. Instale-o primeiro."
+        msg = f"FB{versao} Portable nao esta instalado."
         log(f"ERRO: {msg}")
         return {"ok": False, "erro": msg}
 
@@ -770,9 +1091,14 @@ def ativar_fb(versao: str, log_fn=None) -> dict:
     if servidor is None:
         diag = diagnosticar_instalacao(versao)
         exes = ", ".join(diag["arquivos"]) if diag["arquivos"] else "nenhum"
-        msg  = f"Executavel do servidor nao encontrado. EXEs presentes: [{exes}]."
+        msg  = f"Executavel do servidor nao encontrado. EXEs: [{exes}]."
         log(f"ERRO: {msg}")
         return {"ok": False, "erro": msg}
+
+    # ── Garante security database inicializado (modo processo também) ─────
+    log(f"Verificando security database do FB{versao} ...")
+    inicializar_security_db(versao, log_fn)
+    # ─────────────────────────────────────────────────────────────────────
 
     _salvar_flag(versao, True)
     log(f"Firebird {versao} Portable habilitado (modo processo).")
@@ -782,7 +1108,7 @@ def ativar_fb(versao: str, log_fn=None) -> dict:
         return {"ok": True, "erro": ""}
 
     porta = FB_CONFIGS[versao]["porta"]
-    log(f"Iniciando processo fbserver FB{versao} (porta {porta}) ...")
+    log(f"Iniciando processo FB{versao} (porta {porta}) ...")
     log(f"Servidor: {servidor}")
     try:
         proc = subprocess.Popen(
@@ -802,11 +1128,10 @@ def ativar_fb(versao: str, log_fn=None) -> dict:
                     pass
                 log(f"ERRO: servidor encerrou inesperadamente.\n{saida}")
                 _processos[versao] = None
-                return {"ok": False, "erro": "Servidor encerrou inesperadamente. Veja o log."}
+                return {"ok": False, "erro": "Servidor encerrou inesperadamente."}
             if _processo_rodando(versao):
-                log(f"Firebird {versao} Portable ativado com sucesso (porta {porta}).")
+                log(f"Firebird {versao} Portable ativado (porta {porta}).")
                 return {"ok": True, "erro": ""}
-
         msg = f"FB{versao} pode nao ter subido completamente."
         log(f"AVISO: {msg}")
         ok = _processos[versao] is not None
@@ -818,19 +1143,26 @@ def ativar_fb(versao: str, log_fn=None) -> dict:
 
 
 def inativar_fb(versao: str, log_fn=None) -> dict:
-    """
-    Inativa o Firebird da versão indicada.
-    Detecta automaticamente o modo (processo | serviço).
-    """
     def log(m):
         if log_fn: log_fn(m)
 
     modo = fb_obter_modo(versao)
     if modo == "servico":
         log(f"Modo servico Windows detectado para FB{versao}.")
-        return inativar_fb_servico(versao, log_fn)
+        inativar_fb_servico(versao, log_fn)
 
-    # ── Modo processo portable ──────────────────────────────────────────────
+    # ── Para FB3: para o serviço oficial (instalação nativa) se ativo ────
+    if versao == "3":
+        nome_oficial = _nome_servico_oficial_fb3()
+        if nome_oficial and _servico_rodando(nome_oficial):
+            log(f"Parando servico oficial FB3 '{nome_oficial}' ...")
+            ok_oficial = _servico_parar(nome_oficial, log_fn)
+            if ok_oficial:
+                log(f"Servico oficial '{nome_oficial}' parado com sucesso.")
+            else:
+                log(f"AVISO: nao foi possivel parar o servico oficial '{nome_oficial}'.")
+    # ─────────────────────────────────────────────────────────────────────
+
     if _processo_rodando(versao):
         log(f"Parando processo Firebird {versao} Portable ...")
         _parar_processo(versao, log_fn)
@@ -843,11 +1175,10 @@ def inativar_fb(versao: str, log_fn=None) -> dict:
         log(f"Processo Firebird {versao} Portable ja estava parado.")
 
     _salvar_flag(versao, False)
-    log(f"Firebird {versao} Portable desabilitado e inativado com sucesso.")
+    log(f"Firebird {versao} Portable desabilitado.")
     return {"ok": True, "erro": ""}
 
 
-# Atalhos por versão (compatibilidade)
 def ativar_fb3(log_fn=None)   -> dict: return ativar_fb("3", log_fn)
 def inativar_fb3(log_fn=None) -> dict: return inativar_fb("3", log_fn)
 def ativar_fb4(log_fn=None)   -> dict: return ativar_fb("4", log_fn)
@@ -871,60 +1202,48 @@ def status_detalhado() -> dict:
         rodando    = svc_rod or proc_rod
         habilitado = fb_habilitado(v) if inst else False
 
-        svc_oficial     = None
-        svc_oficial_rod = False
+        svc_oficial = svc_oficial_rod = None
         if v == "3":
             svc_oficial     = _nome_servico_oficial_fb3()
             svc_oficial_rod = _servico_rodando(svc_oficial) if svc_oficial else False
             if svc_oficial_rod:
-                rodando    = True
-                habilitado = True
+                rodando = habilitado = True
 
         st[v] = {
-            "instalado":           inst,
-            "modo":                modo,
-            "servico_nome":        svc_nome,
-            "servico_reg":         svc_reg,
-            "servico_rod":         svc_rod,
-            "processo_rod":        proc_rod,
-            "rodando":             rodando,
-            "habilitado":          habilitado,
-            "servico_oficial":     svc_oficial,
+            "instalado": inst, "modo": modo,
+            "servico_nome": svc_nome, "servico_reg": svc_reg,
+            "servico_rod": svc_rod, "processo_rod": proc_rod,
+            "rodando": rodando, "habilitado": habilitado,
+            "servico_oficial": svc_oficial,
             "servico_oficial_rod": svc_oficial_rod,
         }
 
     conflito = st["3"]["rodando"] and st["4"]["rodando"]
     ativa    = None
     if not conflito:
-        if st["4"]["rodando"]:
-            ativa = "4"
-        elif st["3"]["rodando"]:
-            ativa = "3"
+        ativa = "4" if st["4"]["rodando"] else ("3" if st["3"]["rodando"] else None)
 
     return {
-        "fb3": st["3"],
-        "fb4": st["4"],
-        "versao_ativa": ativa,
-        "conflito":     conflito,
-        # Chaves planas legado
-        "fb3_servico_nome":      st["3"]["servico_nome"],
-        "fb3_rodando":           st["3"]["rodando"],
-        "fb3_habilitado":        st["3"]["habilitado"],
-        "fb3_instalado":         st["3"]["instalado"],
-        "fb3_modo":              st["3"]["modo"],
-        "fb3_servico_reg":       st["3"]["servico_reg"],
-        "fb3_servico_rod":       st["3"]["servico_rod"],
-        "fb3_processo_rod":      st["3"]["processo_rod"],
-        "fb3_servico_oficial":   st["3"]["servico_oficial"],
+        "fb3": st["3"], "fb4": st["4"],
+        "versao_ativa": ativa, "conflito": conflito,
+        "fb3_servico_nome":        st["3"]["servico_nome"],
+        "fb3_rodando":             st["3"]["rodando"],
+        "fb3_habilitado":          st["3"]["habilitado"],
+        "fb3_instalado":           st["3"]["instalado"],
+        "fb3_modo":                st["3"]["modo"],
+        "fb3_servico_reg":         st["3"]["servico_reg"],
+        "fb3_servico_rod":         st["3"]["servico_rod"],
+        "fb3_processo_rod":        st["3"]["processo_rod"],
+        "fb3_servico_oficial":     st["3"]["servico_oficial"],
         "fb3_servico_oficial_rod": st["3"]["servico_oficial_rod"],
-        "fb4_instalado":         st["4"]["instalado"],
-        "fb4_modo":              st["4"]["modo"],
-        "fb4_servico_nome":      st["4"]["servico_nome"],
-        "fb4_servico_reg":       st["4"]["servico_reg"],
-        "fb4_servico_rod":       st["4"]["servico_rod"],
-        "fb4_processo_rod":      st["4"]["processo_rod"],
-        "fb4_rodando":           st["4"]["rodando"],
-        "fb4_habilitado":        st["4"]["habilitado"],
+        "fb4_instalado":           st["4"]["instalado"],
+        "fb4_modo":                st["4"]["modo"],
+        "fb4_servico_nome":        st["4"]["servico_nome"],
+        "fb4_servico_reg":         st["4"]["servico_reg"],
+        "fb4_servico_rod":         st["4"]["servico_rod"],
+        "fb4_processo_rod":        st["4"]["processo_rod"],
+        "fb4_rodando":             st["4"]["rodando"],
+        "fb4_habilitado":          st["4"]["habilitado"],
     }
 
 
@@ -932,7 +1251,6 @@ def versao_ativa_agora() -> str | None:
     return status_detalhado()["versao_ativa"]
 
 
-# Atalho legado — retorna serviço oficial se existir, senão Futura
 def _nome_servico_fb3() -> str | None:
     oficial = _nome_servico_oficial_fb3()
     if oficial:
@@ -942,7 +1260,7 @@ def _nome_servico_fb3() -> str | None:
 
 
 # =============================================================================
-# Alternância exclusiva (compatibilidade)
+# Alternância exclusiva
 # =============================================================================
 
 def alternar_versao_ativa(
@@ -951,18 +1269,13 @@ def alternar_versao_ativa(
 ) -> dict:
     def log(m: str):
         if log_fn: log_fn(m)
-
     if versao_alvo not in ("3", "4"):
         return {"ok": False, "erro": f"Versao invalida: {versao_alvo}", "versao": ""}
-
     outra   = "4" if versao_alvo == "3" else "3"
     label_v = FB_CONFIGS[versao_alvo]["label"]
     log(f"=== Alternando para {label_v} ===")
-    log(f"--- Passo 1: Inativando FB{outra} ---")
     inativar_fb(outra, log_fn)
-    log(f"--- Passo 2: Ativando FB{versao_alvo} ---")
     r = ativar_fb(versao_alvo, log_fn)
-
     if r["ok"]:
         log(f"=== {label_v} esta ativo! ===")
         return {"ok": True, "erro": "", "versao": versao_alvo}
@@ -990,7 +1303,6 @@ def instalar_fb_portable(
 
     def log(m):
         if log_fn: log_fn(m)
-
     def prog(p):
         if progresso_fn: progresso_fn(p)
 
@@ -1001,10 +1313,7 @@ def instalar_fb_portable(
         prog(5)
 
         zip_path = os.path.join(tempfile.gettempdir(), f"firebird{versao}_portable.zip")
-        mb = zip_size // (1024 * 1024)
-        log(f"Baixando {label_v} de:\n  {zip_url}")
-        log(f"Aguarde, o arquivo tem ~{mb} MB...")
-
+        log(f"Baixando {label_v} (~{zip_size//(1024*1024)} MB) ...")
         _baixar_arquivo(zip_url, zip_path, zip_size,
                         progresso_fn=lambda p: prog(5 + int(p * 0.6)))
         prog(65)
@@ -1012,9 +1321,7 @@ def instalar_fb_portable(
 
         log(f"Extraindo para: {fb_dir}")
         with zipfile.ZipFile(zip_path, "r") as zf:
-            members = zf.namelist()
-            total   = len(members)
-            raiz    = ""
+            members = zf.namelist(); total = len(members); raiz = ""
             if members and "/" in members[0]:
                 raiz = members[0].split("/")[0] + "/"
             for i, member in enumerate(members):
@@ -1028,11 +1335,10 @@ def instalar_fb_portable(
                     os.makedirs(os.path.dirname(dest), exist_ok=True)
                     with zf.open(member) as src, open(dest, "wb") as dst:
                         shutil.copyfileobj(src, dst)
-                prog(65 + int((i / total) * 25))
+                prog(65 + int((i / total) * 20))
 
-        prog(90)
+        prog(85)
         log("Extracao concluida.")
-
         diag = diagnosticar_instalacao(versao)
         log("Executaveis encontrados:")
         for arq in diag["arquivos"]:
@@ -1040,36 +1346,34 @@ def instalar_fb_portable(
 
         _configurar_firebird_conf(fb_dir, porta, versao)
         log(f"firebird.conf configurado (porta {porta}).")
+        prog(88)
+
+        # ── Inicializa o security database após extração ──────────────────
+        log(f"Inicializando security database ...")
+        inicializar_security_db(versao, log_fn)
         prog(95)
+        # ─────────────────────────────────────────────────────────────────
 
         gfix = _encontrar_gfix(versao)
         if not gfix:
-            result["erro"] = (
-                f"gfix.exe nao encontrado em {fb_dir} apos extracao. "
-                f"EXEs presentes: {diag['arquivos']}"
-            )
+            result["erro"] = f"gfix.exe nao encontrado. EXEs: {diag['arquivos']}"
             return result
 
         ver = versao_fb_portable(versao)
-        log(f"{label_v} instalado com sucesso! Versao: {ver}")
+        log(f"{label_v} instalado! Versao: {ver}")
         prog(100)
-
         try:
             os.remove(zip_path)
         except Exception:
             pass
-
         result.update({"ok": True, "versao": ver})
-
     except Exception as e:
         result["erro"] = str(e)
-
     return result
 
 
 def instalar_fb3_portable(log_fn=None, progresso_fn=None) -> dict:
     return instalar_fb_portable("3", log_fn, progresso_fn)
-
 
 def instalar_fb4_portable(log_fn=None, progresso_fn=None) -> dict:
     return instalar_fb_portable("4", log_fn, progresso_fn)
@@ -1078,7 +1382,7 @@ def instalar_fb4_portable(log_fn=None, progresso_fn=None) -> dict:
 def _baixar_arquivo(url, destino, tamanho_aprox, progresso_fn=None):
     req = urllib.request.Request(url, headers={"User-Agent": "FuturaSetup/4.3"})
     with urllib.request.urlopen(req, timeout=60) as resp:
-        total   = int(resp.headers.get("Content-Length", tamanho_aprox))
+        total = int(resp.headers.get("Content-Length", tamanho_aprox))
         baixado = 0
         with open(destino, "wb") as f:
             while True:
@@ -1108,19 +1412,14 @@ def remover_fb_portable(versao: str = "4", log_fn=None) -> dict:
     cfg = FB_CONFIGS.get(versao)
     if not cfg:
         return {"ok": False, "erro": f"Versao invalida: {versao}."}
-
     def log(m):
         if log_fn: log_fn(m)
-
     fb_dir  = cfg["dir"]
     label_v = cfg["label"]
-
     if fb_servico_existe(versao):
         log(f"Removendo servico Windows do FB{versao} ...")
         _remover_servico_interno(versao, log_fn)
-
     inativar_fb(versao, log_fn)
-
     result = {"ok": False, "erro": ""}
     try:
         if not os.path.isdir(fb_dir):
@@ -1134,13 +1433,8 @@ def remover_fb_portable(versao: str = "4", log_fn=None) -> dict:
         result["erro"] = str(e)
     return result
 
-
-def remover_fb3_portable(log_fn=None) -> dict:
-    return remover_fb_portable("3", log_fn)
-
-
-def remover_fb4_portable(log_fn=None) -> dict:
-    return remover_fb_portable("4", log_fn)
+def remover_fb3_portable(log_fn=None) -> dict: return remover_fb_portable("3", log_fn)
+def remover_fb4_portable(log_fn=None) -> dict: return remover_fb_portable("4", log_fn)
 
 
 # =============================================================================
@@ -1149,21 +1443,17 @@ def remover_fb4_portable(log_fn=None) -> dict:
 
 def gfix_fb(path, versao="4", user="SYSDBA", password="sbofutura") -> dict:
     gfix = _encontrar_gfix(versao)
-    resultado = {
-        "executado": False, "ok": False,
-        "erros": [], "avisos": [], "saida_bruta": "", "msg": "",
-    }
+    resultado = {"executado": False, "ok": False, "erros": [], "avisos": [], "saida_bruta": "", "msg": ""}
     if not gfix:
         resultado["msg"] = f"FB{versao} Portable nao instalado."
         return resultado
     try:
         proc = subprocess.run(
             [gfix, "-validate", "-full", "-user", user, "-password", password, path],
-            capture_output=True, timeout=120,
-            text=True, encoding="utf-8", errors="ignore",
+            capture_output=True, timeout=120, text=True, encoding="utf-8", errors="ignore",
         )
         saida = (proc.stdout + proc.stderr).strip()
-        resultado["executado"]   = True
+        resultado["executado"] = True
         resultado["saida_bruta"] = saida
         if not saida:
             resultado["ok"] = True
@@ -1184,10 +1474,5 @@ def gfix_fb(path, versao="4", user="SYSDBA", password="sbofutura") -> dict:
         resultado["msg"] = f"Erro ao rodar gfix: {e}"
     return resultado
 
-
-def gfix_fb3(path, user="SYSDBA", password="sbofutura") -> dict:
-    return gfix_fb(path, "3", user, password)
-
-
-def gfix_fb4(path, user="SYSDBA", password="sbofutura") -> dict:
-    return gfix_fb(path, "4", user, password)
+def gfix_fb3(path, user="SYSDBA", password="sbofutura") -> dict: return gfix_fb(path, "3", user, password)
+def gfix_fb4(path, user="SYSDBA", password="sbofutura") -> dict: return gfix_fb(path, "4", user, password)
