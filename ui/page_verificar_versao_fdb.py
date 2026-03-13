@@ -1,6 +1,5 @@
 # =============================================================================
 # FUTURA SETUP — Página: Verificar Versão do Firebird (.fdb)
-# Apenas UI — lógica em core/firebird_version_check.py
 # Salvar em: ui/page_verificar_versao_fdb.py
 # =============================================================================
 
@@ -8,11 +7,12 @@ from __future__ import annotations
 
 import os
 
-from PyQt6.QtCore    import Qt, pyqtSignal
+from PyQt6.QtCore    import Qt, pyqtSignal, QThread
 from PyQt6.QtGui     import QFont, QDragEnterEvent, QDropEvent
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
     QLineEdit, QFileDialog, QLabel, QFrame,
+    QScrollArea,
 )
 
 from ui.theme         import COLORS, FONT_SANS, FONT_MONO
@@ -20,9 +20,36 @@ from ui.theme_manager import theme_manager
 from ui.widgets       import (
     PageTitle, SectionHeader, AlertBox,
     make_primary_btn, make_secondary_btn, make_folder_btn,
-    btn_row, spacer, h_line, label,
+    btn_row, spacer, h_line, label, BusyOverlay,
 )
 from core.firebird_version_check import verificar_versao_fdb
+
+
+# =============================================================================
+# Worker — roda em thread para não travar a UI (gfix pode demorar)
+# =============================================================================
+
+class _VerificarWorker(QThread):
+    concluido = pyqtSignal(dict)
+    erro      = pyqtSignal(str)
+
+    def __init__(self, path: str, user: str, password: str):
+        super().__init__()
+        self._path     = path
+        self._user     = user
+        self._password = password
+
+    def run(self):
+        try:
+            result = verificar_versao_fdb(
+                self._path,
+                user=self._user,
+                password=self._password,
+                rodar_gfix=True,
+            )
+            self.concluido.emit(result)
+        except Exception as e:
+            self.erro.emit(str(e))
 
 
 # =============================================================================
@@ -32,7 +59,6 @@ from core.firebird_version_check import verificar_versao_fdb
 class _PathFieldDB(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(4)
@@ -75,9 +101,7 @@ class _PathFieldDB(QWidget):
 
     def _browse(self):
         path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Selecionar banco de dados Firebird",
-            "C:\\",
+            self, "Selecionar banco de dados Firebird", "C:\\",
             "Banco Firebird (*.fdb *.gdb *.db);;Todos os arquivos (*.*)",
         )
         if path:
@@ -96,67 +120,86 @@ class _PathFieldDB(QWidget):
 # Página principal
 # =============================================================================
 
+_DEFAULT_USER     = "SYSDBA"
+_DEFAULT_PASSWORD = "sbofutura"
+
+
 class PageVerificarVersaoFdb(QWidget):
     go_menu = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAcceptDrops(True)
+        self._worker: QThread | None = None
         self._build_ui()
         theme_manager.theme_changed.connect(self._upd_drop_style)
 
     def _build_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(40, 36, 40, 20)
-        root.setSpacing(10)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        root.addWidget(PageTitle(
-            "VERIFICAR VERSÃO DO FIREBIRD",
-            "Detecta a versão do Firebird a partir de um arquivo .fdb"
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        inner = QWidget()
+        lay = QVBoxLayout(inner)
+        lay.setContentsMargins(40, 36, 40, 20)
+        lay.setSpacing(10)
+
+        lay.addWidget(PageTitle(
+            "VERIFICAR VERSAO DO FIREBIRD",
+            "Detecta a versao e valida a integridade de um arquivo .fdb"
         ))
 
-        root.addWidget(SectionHeader("Arquivo do banco de dados"))
+        lay.addWidget(SectionHeader("Arquivo do banco de dados"))
 
         desc = label(
-            "Selecione ou arraste um arquivo .fdb para identificar "
-            "a versão do Firebird em que foi criado e a versão instalada na máquina.",
+            "Selecione ou arraste um arquivo .fdb. Sera verificada a versao do Firebird "
+            "e rodado o gfix -validate para checar a integridade real do banco.",
             COLORS["text_mid"], 11,
         )
         desc.setWordWrap(True)
-        root.addWidget(desc)
-        root.addWidget(spacer(h=4))
+        lay.addWidget(desc)
+        lay.addWidget(spacer(h=4))
 
         self._fld_db = _PathFieldDB()
-        root.addWidget(self._fld_db)
+        lay.addWidget(self._fld_db)
 
         self._drop_area = _DropArea()
         self._drop_area.arquivo_solto.connect(self._on_arquivo_solto)
-        root.addWidget(self._drop_area)
+        lay.addWidget(self._drop_area)
         self._upd_drop_style()
 
-        root.addWidget(h_line())
+        lay.addWidget(h_line())
 
-        btn_verificar = make_primary_btn("🔍  VERIFICAR VERSÃO", 200)
-        btn_verificar.clicked.connect(self._on_verificar)
-        btn_voltar = make_secondary_btn("← VOLTAR", 80)
+        self._btn_verificar = make_primary_btn("VERIFICAR", 150)
+        self._btn_verificar.clicked.connect(self._on_verificar)
+        btn_voltar = make_secondary_btn("VOLTAR", 80)
         btn_voltar.clicked.connect(self.go_menu.emit)
-        root.addWidget(btn_row(btn_verificar, btn_voltar))
+        lay.addWidget(btn_row(self._btn_verificar, btn_voltar))
 
-        root.addWidget(spacer(h=6))
+        lay.addWidget(spacer(h=6))
 
         self._alert = AlertBox("", "info")
         self._alert.setVisible(False)
-        root.addWidget(self._alert)
+        lay.addWidget(self._alert)
 
         self._card_result = _ResultCard()
         self._card_result.setVisible(False)
-        root.addWidget(self._card_result)
+        lay.addWidget(self._card_result)
 
-        root.addStretch()
+        lay.addStretch()
+
+        scroll.setWidget(inner)
+        root.addWidget(scroll)
+
+        self._overlay = BusyOverlay(self)
 
     def _on_arquivo_solto(self, path: str):
         self._fld_db.value = path
-        self._on_verificar()
 
     def _on_verificar(self):
         path = self._fld_db.value
@@ -165,16 +208,38 @@ class PageVerificarVersaoFdb(QWidget):
             self._card_result.setVisible(False)
             return
 
-        result = verificar_versao_fdb(path)
+        self._btn_verificar.setEnabled(False)
+        self._card_result.setVisible(False)
+        self._alert.setVisible(False)
+        self._overlay.show_with("Validando banco com gfix... aguarde.")
+
+        worker = _VerificarWorker(path, _DEFAULT_USER, _DEFAULT_PASSWORD)
+        worker.concluido.connect(self._on_concluido)
+        worker.erro.connect(self._on_erro)
+        worker.finished.connect(lambda: self._limpar_worker(worker))
+        self._worker = worker
+        worker.start()
+
+    def _on_concluido(self, result: dict):
+        self._overlay.hide_spinner()
+        self._btn_verificar.setEnabled(True)
 
         if not result["ok"]:
-            self._mostrar_alerta(f"✕  {result['erro']}", "error")
-            self._card_result.setVisible(False)
+            self._mostrar_alerta(f"Erro: {result['erro']}", "error")
             return
 
         self._alert.setVisible(False)
-        self._card_result.atualizar(result, path)
+        self._card_result.atualizar(result, self._fld_db.value)
         self._card_result.setVisible(True)
+
+    def _on_erro(self, msg: str):
+        self._overlay.hide_spinner()
+        self._btn_verificar.setEnabled(True)
+        self._mostrar_alerta(f"Erro: {msg}", "error")
+
+    def _limpar_worker(self, worker):
+        if self._worker is worker:
+            self._worker = None
 
     def _mostrar_alerta(self, txt: str, kind: str):
         self._alert.set_text(txt)
@@ -188,6 +253,7 @@ class PageVerificarVersaoFdb(QWidget):
         self._fld_db.value = ""
         self._alert.setVisible(False)
         self._card_result.setVisible(False)
+        self._btn_verificar.setEnabled(True)
 
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls():
@@ -209,41 +275,36 @@ class _DropArea(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAcceptDrops(True)
-        self.setFixedHeight(72)
+        self.setFixedHeight(60)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         lay = QHBoxLayout(self)
         lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
         self._lbl = QLabel("Arraste um arquivo .fdb aqui")
         self._lbl.setFont(QFont(FONT_SANS, 11))
         self._lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(self._lbl)
-
         self.atualizar_estilo()
 
     def atualizar_estilo(self):
-        border = COLORS.get("border", "#444")
-        text   = COLORS.get("text_dim", "#888")
-        bg     = COLORS.get("surface", "#1e1e1e")
-        self._lbl.setStyleSheet(f"color: {text}; background: transparent; border: none;")
+        self._lbl.setStyleSheet(
+            f"color: {COLORS.get('text_dim','#888')}; background: transparent; border: none;"
+        )
         self.setStyleSheet(f"""
             QFrame {{
-                border: 2px dashed {border};
-                border-radius: 10px;
-                background: {bg};
+                border: 2px dashed {COLORS.get('border','#444')};
+                border-radius: 8px;
+                background: {COLORS.get('surface','#1e1e1e')};
             }}
         """)
 
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls():
-            accent = COLORS.get("accent", "#0078d4")
-            bg     = COLORS.get("accent_dim", "#1a3a5c")
             self.setStyleSheet(f"""
                 QFrame {{
-                    border: 2px dashed {accent};
-                    border-radius: 10px;
-                    background: {bg};
+                    border: 2px dashed {COLORS.get('accent','#0078d4')};
+                    border-radius: 8px;
+                    background: {COLORS.get('accent_dim','#1a3a5c')};
                 }}
             """)
             event.acceptProposedAction()
@@ -258,85 +319,186 @@ class _DropArea(QFrame):
             self.arquivo_solto.emit(urls[0].toLocalFile())
 
 
-class _ResultCard(QFrame):
-    """Card com versão do arquivo e versão instalada na máquina."""
+def _divider() -> QFrame:
+    d = QFrame()
+    d.setFrameShape(QFrame.Shape.HLine)
+    d.setFixedHeight(1)
+    d.setStyleSheet(f"background: {COLORS.get('border','#444')}; border: none;")
+    return d
 
+
+class _ResultCard(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("result_card")
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(20, 16, 20, 16)
-        lay.setSpacing(10)
+        lay.setSpacing(6)
 
-        # ── Versão do arquivo ─────────────────────────────────────────────
-        lbl_sec_arquivo = label("Versão que criou o arquivo", COLORS["text_dim"], 10)
-        lay.addWidget(lbl_sec_arquivo)
-
+        # -- Versão do arquivo ----------------------------------------------
+        lay.addWidget(self._sec("Versao que criou o arquivo"))
         self._lbl_versao_arquivo = QLabel("")
-        self._lbl_versao_arquivo.setFont(QFont(FONT_SANS, 17, QFont.Weight.Bold))
+        self._lbl_versao_arquivo.setFont(QFont(FONT_SANS, 15, QFont.Weight.Bold))
         lay.addWidget(self._lbl_versao_arquivo)
 
         row_ods = QHBoxLayout()
         row_ods.setSpacing(6)
-        row_ods.addWidget(label("ODS:", COLORS["text_mid"], 11))
+        row_ods.addWidget(self._mid("ODS:"))
         self._lbl_ods = QLabel("")
-        self._lbl_ods.setFont(QFont(FONT_MONO, 11))
+        self._lbl_ods.setFont(QFont(FONT_MONO, 10))
         row_ods.addWidget(self._lbl_ods)
         row_ods.addStretch()
         lay.addLayout(row_ods)
 
         row_pg = QHBoxLayout()
         row_pg.setSpacing(6)
-        row_pg.addWidget(label("Page size:", COLORS["text_mid"], 11))
+        row_pg.addWidget(self._mid("Page size:"))
         self._lbl_page = QLabel("")
-        self._lbl_page.setFont(QFont(FONT_MONO, 11))
+        self._lbl_page.setFont(QFont(FONT_MONO, 10))
         row_pg.addWidget(self._lbl_page)
         row_pg.addStretch()
         lay.addLayout(row_pg)
 
-        # Divisor
-        div = QFrame()
-        div.setFrameShape(QFrame.Shape.HLine)
-        div.setFixedHeight(1)
-        lay.addWidget(div)
-        self._div = div
+        lay.addWidget(_divider())
 
-        # ── Versão instalada na máquina ───────────────────────────────────
-        lbl_sec_instalada = label("Firebird instalado na máquina", COLORS["text_dim"], 10)
-        lay.addWidget(lbl_sec_instalada)
-
+        # -- Versão instalada -----------------------------------------------
+        lay.addWidget(self._sec("Firebird instalado na maquina"))
         self._lbl_versao_instalada = QLabel("")
-        self._lbl_versao_instalada.setFont(QFont(FONT_SANS, 17, QFont.Weight.Bold))
+        self._lbl_versao_instalada.setFont(QFont(FONT_SANS, 15, QFont.Weight.Bold))
         lay.addWidget(self._lbl_versao_instalada)
 
-        # Arquivo
+        lay.addWidget(_divider())
+
+        # -- Integridade (header) -------------------------------------------
+        lay.addWidget(self._sec("Verificacao do cabecalho"))
+        self._lbl_header = QLabel("")
+        self._lbl_header.setFont(QFont(FONT_SANS, 11, QFont.Weight.Bold))
+        lay.addWidget(self._lbl_header)
+        self._header_det_lay = QVBoxLayout()
+        self._header_det_lay.setSpacing(2)
+        lay.addLayout(self._header_det_lay)
+
+        lay.addWidget(_divider())
+
+        # -- Integridade (gfix) ---------------------------------------------
+        lay.addWidget(self._sec("Validacao gfix (integridade real do banco)"))
+        self._lbl_gfix = QLabel("")
+        self._lbl_gfix.setFont(QFont(FONT_SANS, 11, QFont.Weight.Bold))
+        lay.addWidget(self._lbl_gfix)
+        self._gfix_det_lay = QVBoxLayout()
+        self._gfix_det_lay.setSpacing(2)
+        lay.addLayout(self._gfix_det_lay)
+
+        lay.addWidget(_divider())
+
+        # -- Caminho --------------------------------------------------------
         self._lbl_arquivo = QLabel("")
-        self._lbl_arquivo.setFont(QFont(FONT_MONO, 9))
+        self._lbl_arquivo.setFont(QFont(FONT_MONO, 8))
         self._lbl_arquivo.setWordWrap(True)
         lay.addWidget(self._lbl_arquivo)
 
-        self._lbl_sec_arquivo   = lbl_sec_arquivo
-        self._lbl_sec_instalada = lbl_sec_instalada
-
         self._atualizar_estilo()
 
+    def _sec(self, txt: str) -> QLabel:
+        lbl = QLabel(txt)
+        lbl.setFont(QFont(FONT_SANS, 9))
+        lbl.setStyleSheet(
+            f"color: {COLORS.get('text_dim','#888')}; background: transparent; border: none;"
+        )
+        return lbl
+
+    def _mid(self, txt: str) -> QLabel:
+        lbl = QLabel(txt)
+        lbl.setFont(QFont(FONT_SANS, 10))
+        lbl.setStyleSheet(
+            f"color: {COLORS.get('text_mid','#aaa')}; background: transparent; border: none;"
+        )
+        return lbl
+
     def atualizar(self, result: dict, path: str):
+        # Versão arquivo
         self._lbl_versao_arquivo.setText(result["versao_arquivo"])
         self._lbl_ods.setText(f"{result['ods_major']}.{result['ods_minor']}")
         pg = result["page_size"]
-        self._lbl_page.setText(f"{pg} bytes ({pg // 1024} KB)" if pg >= 1024 else f"{pg} bytes")
+        self._lbl_page.setText(
+            f"{pg} bytes  ({pg // 1024} KB)" if pg >= 1024 else f"{pg} bytes"
+        )
+
+        # Versão instalada
         self._lbl_versao_instalada.setText(result["versao_instalada"])
+
+        # Header
+        self._limpar(self._header_det_lay)
+        if result["header_ok"]:
+            self._lbl_header.setText("Cabecalho OK")
+            self._lbl_header.setStyleSheet(
+                f"color: {COLORS.get('accent2','#2ecc71')}; background: transparent; border: none;"
+            )
+        else:
+            self._lbl_header.setText("Cabecalho com problemas")
+            self._lbl_header.setStyleSheet(
+                f"color: {COLORS.get('danger','#e74c3c')}; background: transparent; border: none;"
+            )
+        for e in result["header_erros"]:
+            self._add(self._header_det_lay, f"  X  {e}", COLORS.get("danger", "#e74c3c"))
+        for d in result["header_detalhes"]:
+            self._add(self._header_det_lay, f"  v  {d}", COLORS.get("text_dim", "#888"))
+
+        # gfix
+        self._limpar(self._gfix_det_lay)
+        if not result["gfix_executado"]:
+            msg = result["gfix_msg"] or "gfix nao executado."
+            self._lbl_gfix.setText("Nao validado pelo gfix")
+            self._lbl_gfix.setStyleSheet(
+                f"color: {COLORS.get('warn','#f39c12')}; background: transparent; border: none;"
+            )
+            self._add(self._gfix_det_lay, f"  !  {msg}", COLORS.get("warn", "#f39c12"))
+        elif result["gfix_ok"] and not result["gfix_avisos"]:
+            self._lbl_gfix.setText("Banco integro (sem erros)")
+            self._lbl_gfix.setStyleSheet(
+                f"color: {COLORS.get('accent2','#2ecc71')}; background: transparent; border: none;"
+            )
+            self._add(self._gfix_det_lay, "  v  gfix -validate -full concluido sem erros",
+                      COLORS.get("text_dim", "#888"))
+        else:
+            total = len(result["gfix_erros"])
+            self._lbl_gfix.setText(
+                f"Corrupcao detectada ({total} erro(s))" if total
+                else "Validacao com avisos"
+            )
+            cor = COLORS.get("danger", "#e74c3c") if total else COLORS.get("warn", "#f39c12")
+            self._lbl_gfix.setStyleSheet(
+                f"color: {cor}; background: transparent; border: none;"
+            )
+            for e in result["gfix_erros"]:
+                self._add(self._gfix_det_lay, f"  X  {e}", COLORS.get("danger", "#e74c3c"))
+            for a in result["gfix_avisos"]:
+                self._add(self._gfix_det_lay, f"  !  {a}", COLORS.get("warn", "#f39c12"))
+
         self._lbl_arquivo.setText(path)
         self._atualizar_estilo()
+
+    def _limpar(self, layout: QVBoxLayout):
+        while layout.count():
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+    def _add(self, layout: QVBoxLayout, txt: str, cor: str):
+        lbl = QLabel(txt)
+        lbl.setFont(QFont(FONT_MONO, 9))
+        lbl.setWordWrap(True)
+        lbl.setStyleSheet(f"color: {cor}; background: transparent; border: none;")
+        layout.addWidget(lbl)
 
     def _atualizar_estilo(self):
         accent  = COLORS.get("accent",   "#0078d4")
         accent2 = COLORS.get("accent2",  "#2ecc71")
         bg      = COLORS.get("surface",  "#1e1e1e")
         border  = COLORS.get("accent",   "#0078d4")
-        dim     = COLORS.get("text_dim", "#888")
         mid     = COLORS.get("text_mid", "#aaa")
+        dim     = COLORS.get("text_dim", "#888")
 
         self._lbl_versao_arquivo.setStyleSheet(
             f"color: {accent}; background: transparent; border: none;"
@@ -353,21 +515,11 @@ class _ResultCard(QFrame):
         self._lbl_arquivo.setStyleSheet(
             f"color: {dim}; background: transparent; border: none;"
         )
-        self._lbl_sec_arquivo.setStyleSheet(
-            f"color: {dim}; background: transparent; border: none;"
-        )
-        self._lbl_sec_instalada.setStyleSheet(
-            f"color: {dim}; background: transparent; border: none;"
-        )
-        self._div.setStyleSheet(f"background: {COLORS.get('border', '#444')}; border: none;")
         self.setStyleSheet(f"""
             QFrame#result_card {{
                 background: {bg};
                 border: 2px solid {border};
                 border-radius: 10px;
             }}
-            QLabel {{
-                background: transparent;
-                border: none;
-            }}
+            QLabel {{ background: transparent; border: none; }}
         """)

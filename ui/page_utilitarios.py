@@ -139,7 +139,8 @@ class PageUtilitarios(QWidget):
     go_implantar_mobile     = pyqtSignal()
     go_shutdown_online      = pyqtSignal()
     go_instalar_firebird    = pyqtSignal()
-    go_verificar_versao_fdb = pyqtSignal()  # ← novo
+    go_verificar_versao_fdb = pyqtSignal()
+    go_fb_portable          = pyqtSignal()  # novo
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -179,8 +180,11 @@ class PageUtilitarios(QWidget):
              "Baixa e instala o Firebird 3 ou 4 silenciosamente",
              COLORS["accent2"], self.go_instalar_firebird),
             ("09", "Verificar Versão .fdb",
-             "Detecta a versão do Firebird a partir de um arquivo .fdb",
-             COLORS["accent2"], self.go_verificar_versao_fdb),  # ← novo
+             "Detecta a versão do Firebird e valida a integridade do arquivo",
+             COLORS["accent2"], self.go_verificar_versao_fdb),
+            ("10", "FB4 Portable",
+             "Instala o Firebird 4 lado a lado com o FB3, sem conflitos",
+             COLORS["accent2"], self.go_fb_portable),  # novo
         ]
 
         for num, title, desc, accent, sig in items:
