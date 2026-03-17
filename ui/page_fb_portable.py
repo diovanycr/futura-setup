@@ -5,6 +5,7 @@
 #   - Modo processo ou serviço Windows
 #   - Toggle ativar/inativar independente
 #   - Ativar uma versão desativa automaticamente a outra
+#   - Configuração do databases.conf com varredura de .fdb
 # Salvar em: ui/page_fb_portable.py
 # =============================================================================
 from __future__ import annotations
@@ -15,7 +16,8 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QFrame, QScrollArea, QProgressBar,
     QButtonGroup, QRadioButton, QAbstractButton,
-    QPlainTextEdit, QPushButton,
+    QPlainTextEdit, QPushButton, QListWidget,
+    QListWidgetItem, QAbstractItemView, QFileDialog, QTabWidget,
 )
 
 from ui.theme         import COLORS, FONT_SANS, FONT_MONO
@@ -40,6 +42,9 @@ from core.fb_portable import (
     fb_servico_rodando,
     registrar_fb_servico,
     remover_fb_servico,
+    varrer_fdb,
+    atualizar_databases_conf,
+    aplicar_configs_oficiais_fb4,
 )
 
 # Cores por versão
@@ -92,11 +97,6 @@ class _ToggleSwitch(QAbstractButton):
 # =============================================================================
 
 class _AlternarWorker(QThread):
-    """
-    Worker principal de ativação.
-    - Se checked=True  → alternar_versao_ativa(versao): desativa a outra e ativa esta.
-    - Se checked=False → inativar_fb(versao): apenas desativa.
-    """
     log       = pyqtSignal(str)
     concluido = pyqtSignal(dict)
 
@@ -111,7 +111,6 @@ class _AlternarWorker(QThread):
         else:
             r = inativar_fb(self.versao, self.log.emit)
             r.setdefault("versao", self.versao)
-
         r["versao"] = self.versao
         r["ativar"] = self.ativar
         self.concluido.emit(r)
@@ -145,7 +144,6 @@ class _RemoverWorker(QThread):
 
 
 class _ServicoWorker(QThread):
-    """Worker para registrar ou remover o serviço Windows de qualquer versão."""
     log       = pyqtSignal(str)
     concluido = pyqtSignal(dict)
 
@@ -164,12 +162,55 @@ class _ServicoWorker(QThread):
         self.concluido.emit(r)
 
 
+class _ConfigsOficiaisWorker(QThread):
+    """Worker para baixar e aplicar configs oficiais do FB4."""
+    log       = pyqtSignal(str)
+    concluido = pyqtSignal(dict)
+
+    def __init__(self, caminho_dados: str = "", caminho_cep: str = "", parent=None):
+        super().__init__(parent)
+        self.caminho_dados = caminho_dados
+        self.caminho_cep   = caminho_cep
+
+    def run(self):
+        r = aplicar_configs_oficiais_fb4(
+            caminho_dados=self.caminho_dados,
+            caminho_cep=self.caminho_cep,
+            log_fn=self.log.emit,
+        )
+        self.concluido.emit(r)
+
+
+class _VarreduraWorker(QThread):
+    """Worker para varredura de arquivos .fdb no HD."""
+    log       = pyqtSignal(str)
+    concluido = pyqtSignal(list)
+
+    def run(self):
+        arquivos = varrer_fdb(log_fn=self.log.emit)
+        self.concluido.emit(arquivos)
+
+
+class _DatabasesConfWorker(QThread):
+    """Worker para atualizar o databases.conf."""
+    log       = pyqtSignal(str)
+    concluido = pyqtSignal(dict)
+
+    def __init__(self, versao: str, caminho_dados: str, parent=None):
+        super().__init__(parent)
+        self.versao        = versao
+        self.caminho_dados = caminho_dados
+
+    def run(self):
+        r = atualizar_databases_conf(self.versao, self.caminho_dados, self.log.emit)
+        self.concluido.emit(r)
+
+
 # =============================================================================
-# Card de modo de execução — reutilizável para FB3 e FB4
+# Card de modo de execução
 # =============================================================================
 
 class _ModoCard(QFrame):
-    """Card com info do modo (processo / serviço) e botão de ação."""
     acao_solicitada = pyqtSignal(str, str)   # (versao, 'registrar'|'remover')
 
     def __init__(self, versao: str, parent=None):
@@ -233,7 +274,7 @@ class _ModoCard(QFrame):
         desc_row.addWidget(self._btn_acao)
         lay.addLayout(desc_row)
 
-        self._lbl_nota = QLabel("⚠  Requer privilégios de administrador")
+        self._lbl_nota = QLabel("[!] Requer privilegios de administrador")
         self._lbl_nota.setFont(QFont(FONT_SANS, 8))
         self._lbl_nota.setStyleSheet(
             "color:#e67e22; background:transparent; border:none;"
@@ -262,7 +303,7 @@ class _ModoCard(QFrame):
             self._dot.setStyleSheet(f"background:{cor}; border-radius:4px;")
             estado = "RUNNING" if svc_rodando else "PARADO"
             self._lbl_modo.setText(
-                f"Serviço Windows  •  FuturaFirebirdFB{v}  •  {estado}"
+                f"Serviço Windows - FuturaFirebirdFB{v} - {estado}"
             )
             self._badge.setText("SERVIÇO")
             self._badge.setStyleSheet(f"""
@@ -281,7 +322,7 @@ class _ModoCard(QFrame):
             self._dot.setStyleSheet(
                 f"background:{COLORS.get('text_dim','#888')}; border-radius:4px;"
             )
-            self._lbl_modo.setText(f"Processo portable  •  inicia com o Futura Setup")
+            self._lbl_modo.setText(f"Processo portable - inicia com o Futura Setup")
             self._badge.setText("PROCESSO")
             self._badge.setStyleSheet(f"""
                 QLabel {{
@@ -484,10 +525,11 @@ class _StatusCard(QFrame):
 # =============================================================================
 
 class _Console(QFrame):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, fixed_height: int = 200):
         super().__init__(parent)
         self.setObjectName("console")
-        self.setFixedHeight(200)
+        if fixed_height > 0:
+            self.setFixedHeight(fixed_height)
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -570,7 +612,7 @@ class _BannerAdmin(QFrame):
         lay.setContentsMargins(14, 10, 14, 10)
         lay.setSpacing(12)
 
-        ico = QLabel("⚠")
+        ico = QLabel("[!]")
         ico.setFont(QFont(FONT_SANS, 14))
         ico.setStyleSheet("color:#e67e22; background:transparent; border:none;")
         ico.setFixedWidth(24)
@@ -608,6 +650,416 @@ class _BannerAdmin(QFrame):
 
 
 # =============================================================================
+# Card databases.conf
+# =============================================================================
+
+class _DatabasesConfCard(QFrame):
+    """
+    Card para varredura de .fdb e configuração do databases.conf.
+    O usuário seleciona o dados.fdb — o cep.fdb é inferido da mesma pasta.
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("db_conf_card")
+        self._arquivos: list[str] = []
+        self._worker: QThread | None = None
+        self._build_ui()
+        self._upd_style()
+        theme_manager.theme_changed.connect(lambda _: self._upd_style())
+
+    def _build_ui(self):
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(16, 14, 16, 14)
+        lay.setSpacing(10)
+
+        # Cabeçalho
+        titulo = QLabel("Configurar databases.conf")
+        titulo.setFont(QFont(FONT_SANS, 11, QFont.Weight.Bold))
+        titulo.setStyleSheet(
+            f"color:{COLORS.get('text','#fff')}; background:transparent; border:none;"
+        )
+        lay.addWidget(titulo)
+
+        desc = QLabel(
+            "Varre o HD em busca de arquivos .fdb, selecione o arquivo Dados "
+            "e clique em Aplicar. O cep.fdb será configurado automaticamente "
+            "a partir da mesma pasta."
+        )
+        desc.setFont(QFont(FONT_SANS, 9))
+        desc.setWordWrap(True)
+        desc.setStyleSheet(
+            f"color:{COLORS.get('text_dim','#888')}; background:transparent; border:none;"
+        )
+        lay.addWidget(desc)
+
+        # Seleção de versão
+        ver_row = QHBoxLayout()
+        ver_row.setSpacing(8)
+        lbl_ver = QLabel("Versão:")
+        lbl_ver.setFont(QFont(FONT_SANS, 9))
+        lbl_ver.setStyleSheet(
+            f"color:{COLORS.get('text_mid','#aaa')}; background:transparent; border:none;"
+        )
+        self._radio_fb3 = QRadioButton("FB3 (porta 3050)")
+        self._radio_fb4 = QRadioButton("FB4 (porta 3051)")
+        self._radio_fb3.setFont(QFont(FONT_SANS, 9))
+        self._radio_fb4.setFont(QFont(FONT_SANS, 9))
+        self._radio_fb3.setStyleSheet(
+            f"color:{COLORS.get('text','#fff')}; background:transparent;"
+        )
+        self._radio_fb4.setStyleSheet(
+            f"color:{COLORS.get('text','#fff')}; background:transparent;"
+        )
+        self._radio_fb4.setChecked(True)
+        ver_row.addWidget(lbl_ver)
+        ver_row.addWidget(self._radio_fb3)
+        ver_row.addWidget(self._radio_fb4)
+        ver_row.addStretch()
+        lay.addLayout(ver_row)
+
+        # Botões varrer / selecionar via Explorer
+        btns_row = QHBoxLayout()
+        btns_row.setSpacing(8)
+        self._btn_varrer = make_primary_btn("Varrer HD", 140)
+        self._btn_varrer.clicked.connect(self._on_varrer)
+        self._btn_explorer = make_secondary_btn("Selecionar arquivo", 180)
+        self._btn_explorer.clicked.connect(self._on_selecionar_explorer)
+        btns_row.addWidget(self._btn_varrer)
+        btns_row.addWidget(self._btn_explorer)
+        btns_row.addStretch()
+        lay.addLayout(btns_row)
+
+        # Label contador
+        self._lbl_count = QLabel("")
+        self._lbl_count.setFont(QFont(FONT_MONO, 9))
+        self._lbl_count.setStyleSheet(
+            f"color:{COLORS.get('text_dim','#888')}; background:transparent; border:none;"
+        )
+        lay.addWidget(self._lbl_count)
+
+        # Lista de arquivos
+        self._lista = QListWidget()
+        self._lista.setFixedHeight(180)
+        self._lista.setFont(QFont(FONT_MONO, 9))
+        self._lista.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self._lista.itemSelectionChanged.connect(self._on_selecao_changed)
+        self._lista.setStyleSheet(self._lista_style())
+        lay.addWidget(self._lista)
+
+        # Preview do caminho selecionado
+        prev_row = QHBoxLayout()
+        prev_row.setSpacing(8)
+        lbl_prev = QLabel("Dados:")
+        lbl_prev.setFont(QFont(FONT_SANS, 9, QFont.Weight.Bold))
+        lbl_prev.setFixedWidth(50)
+        lbl_prev.setStyleSheet(
+            f"color:{COLORS.get('text_mid','#aaa')}; background:transparent; border:none;"
+        )
+        self._lbl_dados = QLabel("—")
+        self._lbl_dados.setFont(QFont(FONT_MONO, 9))
+        self._lbl_dados.setWordWrap(True)
+        self._lbl_dados.setStyleSheet(
+            f"color:{COLORS.get('accent','#0078d4')}; background:transparent; border:none;"
+        )
+        prev_row.addWidget(lbl_prev)
+        prev_row.addWidget(self._lbl_dados, 1)
+        lay.addLayout(prev_row)
+
+        cep_row = QHBoxLayout()
+        cep_row.setSpacing(8)
+        lbl_cep = QLabel("Cep:")
+        lbl_cep.setFont(QFont(FONT_SANS, 9, QFont.Weight.Bold))
+        lbl_cep.setFixedWidth(50)
+        lbl_cep.setStyleSheet(
+            f"color:{COLORS.get('text_mid','#aaa')}; background:transparent; border:none;"
+        )
+        self._lbl_cep = QLabel("—")
+        self._lbl_cep.setFont(QFont(FONT_MONO, 9))
+        self._lbl_cep.setWordWrap(True)
+        self._lbl_cep.setStyleSheet(
+            f"color:{COLORS.get('text_dim','#888')}; background:transparent; border:none;"
+        )
+        cep_row.addWidget(lbl_cep)
+        cep_row.addWidget(self._lbl_cep, 1)
+        lay.addLayout(cep_row)
+
+        # Botão aplicar
+        self._btn_aplicar = make_primary_btn("Aplicar", 120)
+        self._btn_aplicar.setEnabled(False)
+        self._btn_aplicar.clicked.connect(self._on_aplicar)
+
+        self._lbl_resultado = QLabel("")
+        self._lbl_resultado.setFont(QFont(FONT_SANS, 9))
+        self._lbl_resultado.setWordWrap(True)
+        self._lbl_resultado.setStyleSheet(
+            "color:#2ecc71; background:transparent; border:none;"
+        )
+
+        aplic_row = QHBoxLayout()
+        aplic_row.setSpacing(12)
+        aplic_row.addWidget(self._btn_aplicar)
+        aplic_row.addWidget(self._lbl_resultado, 1)
+        lay.addLayout(aplic_row)
+
+        # Separador
+        div2 = QFrame()
+        div2.setFrameShape(QFrame.Shape.HLine)
+        div2.setStyleSheet(f"color:{COLORS.get('border','#444')};")
+        lay.addWidget(div2)
+
+        # Botão configs oficiais FB4
+        self._btn_configs_oficiais = make_secondary_btn("Aplicar configs oficiais FB4", 240)
+        self._btn_configs_oficiais.setToolTip(
+            "Baixa firebird.conf, databases.conf e Usuarios.sql do repositório Futura "
+            "e reinicia o serviço FB4."
+        )
+        self._btn_configs_oficiais.clicked.connect(self._on_configs_oficiais)
+        lbl_conf = QLabel("Baixa os arquivos oficiais do repositório Futura e reinicia o serviço.")
+        lbl_conf.setFont(QFont(FONT_SANS, 8))
+        lbl_conf.setWordWrap(True)
+        lbl_conf.setStyleSheet(
+            f"color:{COLORS.get('text_dim','#888')}; background:transparent; border:none;"
+        )
+        conf_row = QHBoxLayout()
+        conf_row.setSpacing(12)
+        conf_row.addWidget(self._btn_configs_oficiais)
+        conf_row.addWidget(lbl_conf, 1)
+        lay.addLayout(conf_row)
+
+        self._lbl_conf_resultado = QLabel("")
+        self._lbl_conf_resultado.setFont(QFont(FONT_SANS, 9))
+        self._lbl_conf_resultado.setWordWrap(True)
+        self._lbl_conf_resultado.setStyleSheet(
+            "color:#2ecc71; background:transparent; border:none;"
+        )
+        lay.addWidget(self._lbl_conf_resultado)
+
+    # -- Varredura --------------------------------------------------------
+
+    def _on_varrer(self):
+        self._lista.clear()
+        self._arquivos = []
+        self._lbl_count.setText("Varrendo... aguarde.")
+        self._btn_varrer.setEnabled(False)
+        self._btn_explorer.setEnabled(False)
+        self._btn_aplicar.setEnabled(False)
+        self._lbl_dados.setText("—")
+        self._lbl_cep.setText("—")
+        self._lbl_resultado.setText("")
+
+        worker = _VarreduraWorker()
+        worker.log.connect(lambda m: self._lbl_count.setText(m))
+        worker.concluido.connect(self._on_varredura_concluida)
+        worker.finished.connect(lambda: setattr(self, "_worker", None))
+        self._worker = worker
+        worker.start()
+
+    def _on_varredura_concluida(self, arquivos: list[str]):
+        self._arquivos = arquivos
+        self._btn_varrer.setEnabled(True)
+        self._btn_explorer.setEnabled(True)
+        self._lista.clear()
+
+        if not arquivos:
+            self._lbl_count.setText("Nenhum arquivo .fdb encontrado.")
+            return
+
+        self._lbl_count.setText(
+            f"{len(arquivos)} arquivo(s) .fdb encontrado(s) — selecione o Dados:"
+        )
+        for caminho in arquivos:
+            item = QListWidgetItem(caminho)
+            item.setToolTip(caminho)
+            self._lista.addItem(item)
+
+    # -- Selecionar via Explorer -----------------------------------------
+
+    def _on_selecionar_explorer(self):
+        import os
+        caminho, _ = QFileDialog.getOpenFileName(
+            self,
+            "Selecionar arquivo Dados",
+            "C:\\",
+            "Firebird Database (*.fdb);;Todos os arquivos (*.*)",
+        )
+        if not caminho:
+            return
+
+        # Normaliza separadores
+        caminho = os.path.normpath(caminho)
+        pasta   = os.path.dirname(caminho)
+        cep     = os.path.join(pasta, "cep.fdb")
+
+        # Adiciona à lista se ainda não estiver
+        existentes = [self._lista.item(i).text() for i in range(self._lista.count())]
+        if caminho not in existentes:
+            item = QListWidgetItem(caminho)
+            item.setToolTip(caminho)
+            self._lista.insertItem(0, item)
+            total = len(existentes) + 1
+            self._lbl_count.setText(f"{total} arquivo(s) listado(s) — selecione o Dados:")
+
+        # Seleciona o item
+        for i in range(self._lista.count()):
+            if self._lista.item(i).text() == caminho:
+                self._lista.setCurrentRow(i)
+                break
+
+        self._lbl_dados.setText(caminho)
+        self._lbl_cep.setText(cep)
+        self._btn_aplicar.setEnabled(True)
+        self._lbl_resultado.setText("")
+
+    # -- Seleção ----------------------------------------------------------
+
+    def _on_selecao_changed(self):
+        import os
+        items = self._lista.selectedItems()
+        if not items:
+            self._lbl_dados.setText("—")
+            self._lbl_cep.setText("—")
+            self._btn_aplicar.setEnabled(False)
+            return
+
+        caminho_dados = items[0].text()
+        pasta         = os.path.dirname(caminho_dados)
+        caminho_cep   = os.path.join(pasta, "cep.fdb")
+
+        self._lbl_dados.setText(caminho_dados)
+        self._lbl_cep.setText(caminho_cep)
+        self._btn_aplicar.setEnabled(True)
+        self._lbl_resultado.setText("")
+
+    # -- Aplicar ----------------------------------------------------------
+
+    def _on_aplicar(self):
+        items = self._lista.selectedItems()
+        if not items:
+            return
+
+        versao        = "3" if self._radio_fb3.isChecked() else "4"
+        caminho_dados = items[0].text()
+
+        if not fb_portable_instalado(versao):
+            self._lbl_resultado.setText(
+                f"[!] FB{versao} não está instalado."
+            )
+            self._lbl_resultado.setStyleSheet(
+                "color:#e67e22; background:transparent; border:none;"
+            )
+            return
+
+        self._btn_aplicar.setEnabled(False)
+        self._btn_varrer.setEnabled(False)
+        self._btn_explorer.setEnabled(False)
+        self._lbl_resultado.setText("Aplicando...")
+        self._lbl_resultado.setStyleSheet(
+            f"color:{COLORS.get('text_mid','#aaa')}; background:transparent; border:none;"
+        )
+
+        worker = _DatabasesConfWorker(versao, caminho_dados)
+        worker.concluido.connect(self._on_aplicar_concluido)
+        worker.finished.connect(lambda: setattr(self, "_worker", None))
+        self._worker = worker
+        worker.start()
+
+    def _on_configs_oficiais(self):
+        self._btn_configs_oficiais.setEnabled(False)
+        self._btn_varrer.setEnabled(False)
+        self._btn_explorer.setEnabled(False)
+        self._btn_aplicar.setEnabled(False)
+        self._lbl_conf_resultado.setText("Baixando e aplicando...")
+        self._lbl_conf_resultado.setStyleSheet(
+            f"color:{COLORS.get('text_mid','#aaa')}; background:transparent; border:none;"
+        )
+
+        # Pega caminho selecionado se houver
+        items = self._lista.selectedItems()
+        caminho_dados = items[0].text() if items else ""
+
+        worker = _ConfigsOficiaisWorker(caminho_dados=caminho_dados)
+        worker.log.connect(lambda m: self._lbl_conf_resultado.setText(m))
+        worker.concluido.connect(self._on_configs_oficiais_concluido)
+        worker.finished.connect(lambda: setattr(self, "_worker", None))
+        self._worker = worker
+        worker.start()
+
+    def _on_configs_oficiais_concluido(self, r: dict):
+        self._btn_configs_oficiais.setEnabled(True)
+        self._btn_varrer.setEnabled(True)
+        self._btn_explorer.setEnabled(True)
+        self._btn_aplicar.setEnabled(bool(self._lista.selectedItems()))
+        if r["ok"]:
+            self._lbl_conf_resultado.setText("Configs oficiais FB4 aplicadas com sucesso!")
+            self._lbl_conf_resultado.setStyleSheet(
+                "color:#2ecc71; background:transparent; border:none;"
+            )
+        else:
+            self._lbl_conf_resultado.setText(f"Erro: {r['erro']}")
+            self._lbl_conf_resultado.setStyleSheet(
+                "color:#e74c3c; background:transparent; border:none;"
+            )
+
+    def _on_aplicar_concluido(self, r: dict):
+        self._btn_aplicar.setEnabled(True)
+        self._btn_varrer.setEnabled(True)
+        self._btn_explorer.setEnabled(True)
+        if r["ok"]:
+            versao = "3" if self._radio_fb3.isChecked() else "4"
+            conf   = r.get("conf_path", "databases.conf")
+            self._lbl_resultado.setText(f"databases.conf do FB{versao} atualizado!")
+            self._lbl_resultado.setStyleSheet(
+                "color:#2ecc71; background:transparent; border:none;"
+            )
+        else:
+            self._lbl_resultado.setText(f"Erro: {r['erro']}")
+            self._lbl_resultado.setStyleSheet(
+                "color:#e74c3c; background:transparent; border:none;"
+            )
+
+    # -- Estilo -----------------------------------------------------------
+
+    def _lista_style(self) -> str:
+        bg   = COLORS.get("bg",      "#121212")
+        surf = COLORS.get("surface", "#1e1e1e")
+        brd  = COLORS.get("border",  "#444")
+        acc  = COLORS.get("accent",  "#0078d4")
+        txt  = COLORS.get("text",    "#fff")
+        return f"""
+            QListWidget {{
+                background:{bg}; color:{txt};
+                border:1px solid {brd}; border-radius:6px;
+                padding:4px;
+            }}
+            QListWidget::item {{
+                padding:4px 8px; border-radius:4px;
+            }}
+            QListWidget::item:selected {{
+                background:{acc}; color:#fff;
+            }}
+            QListWidget::item:hover:!selected {{
+                background:{surf};
+            }}
+            QScrollBar:vertical {{
+                background:{surf}; width:8px; border-radius:4px;
+            }}
+            QScrollBar::handle:vertical {{
+                background:{brd}; border-radius:4px; min-height:20px;
+            }}
+        """
+
+    def _upd_style(self, _=""):
+        self._lista.setStyleSheet(self._lista_style())
+        self.setStyleSheet(f"""
+            QFrame#db_conf_card {{
+                background:{COLORS.get('surface','#1e1e1e')};
+                border:1.5px solid {COLORS.get('border','#444')};
+                border-radius:10px;
+            }}
+        """)
+
+
+# =============================================================================
 # Página principal
 # =============================================================================
 
@@ -618,7 +1070,7 @@ class PageFbPortable(QWidget):
         super().__init__(parent)
         self._worker: QThread | None = None
         self._versao_sel   = "4"
-        self._upd_toggle   = False   # bloqueia sinal durante atualização
+        self._upd_toggle   = False
         self._toggle_rows  : dict[str, _ToggleRow]  = {}
         self._modo_cards   : dict[str, _ModoCard]   = {}
         self._build_ui()
@@ -638,6 +1090,7 @@ class PageFbPortable(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
+        # -- Container principal com scroll -------------------------------
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
@@ -661,64 +1114,83 @@ class PageFbPortable(QWidget):
         else:
             self._banner_admin = None
 
-        # Info
-        lay.addWidget(SectionHeader("Como funciona"))
+        # -- ABAS ----------------------------------------------------------
+        self._tabs = QTabWidget()
+        self._tabs.setFont(QFont(FONT_SANS, 10))
+        lay.addWidget(self._tabs)
+
+        # -- ABA 1: Controle de versões ------------------------------------
+        tab_controle = QWidget()
+        tab_controle.setMinimumWidth(660)
+        tlay_root = QVBoxLayout(tab_controle)
+        tlay_root.setContentsMargins(0, 16, 0, 0)
+        tlay_root.setSpacing(10)
+
         info = label(
-            "Ambas as versões podem ser instaladas como portable e rodar como "
-            "processo (ativo apenas com o Futura Setup aberto) ou como serviço "
-            "Windows (start=auto, inicia com o Windows). "
-            "FB3 usa a porta 3050, FB4 usa a porta 3051. "
-            "Ativar uma versão desativa automaticamente a outra.",
-            COLORS["text_mid"], 11,
+            "Ative/inative cada versão e configure o modo de execução. "
+            "Ativar uma versão desativa automaticamente a outra. "
+            "Ambas usam a porta 3050.",
+            COLORS["text_mid"], 10,
         )
         info.setWordWrap(True)
-        lay.addWidget(info)
-        lay.addWidget(spacer(h=8))
+        tlay_root.addWidget(info)
+        tlay_root.addWidget(spacer(h=6))
 
-        # ── TOGGLES ───────────────────────────────────────────────────────
-        lay.addWidget(SectionHeader("Controle de versões"))
-
+        # Cards FB3 e FB4 lado a lado com scroll horizontal se necessário
         tf = QFrame()
         tf.setObjectName("toggles_frame")
-        tlay = QVBoxLayout(tf)
-        tlay.setContentsMargins(20, 16, 20, 16)
-        tlay.setSpacing(16)
+        tlay_cols = QHBoxLayout(tf)
+        tlay_cols.setContentsMargins(16, 16, 16, 16)
+        tlay_cols.setSpacing(16)
 
-        for i, versao in enumerate(("3", "4")):
+        for versao in ("3", "4"):
             cfg     = FB_CONFIGS[versao]
-            detalhe = f"Processo portable  •  porta {cfg['porta']}"
-            row     = _ToggleRow(versao, detalhe)
+            detalhe = f"Processo portable - porta {cfg['porta']}"
+
+            # Wrapper frame por versão — largura mínima garantida
+            col_frame = QFrame()
+            col_frame.setMinimumWidth(320)
+            col_lay = QVBoxLayout(col_frame)
+            col_lay.setContentsMargins(0, 0, 0, 0)
+            col_lay.setSpacing(10)
+
+            row = _ToggleRow(versao, detalhe)
             row.toggle.toggled.connect(
                 lambda checked, v=versao: self._on_toggle(v, checked)
             )
             self._toggle_rows[versao] = row
-            tlay.addWidget(row)
+            col_lay.addWidget(row)
 
             card = _ModoCard(versao)
             card.acao_solicitada.connect(self._on_servico_acao)
             self._modo_cards[versao] = card
-            tlay.addWidget(card)
+            col_lay.addWidget(card)
+            col_lay.addStretch()
 
-            if i == 0:
-                div = QFrame()
-                div.setFrameShape(QFrame.Shape.HLine)
-                div.setStyleSheet(f"color:{COLORS.get('border','#444')};")
-                tlay.addWidget(div)
+            tlay_cols.addWidget(col_frame, 1)
 
-        lay.addWidget(tf)
-        lay.addWidget(spacer(h=6))
-        lay.addWidget(h_line())
+        tlay_root.addWidget(tf)
+        tlay_root.addStretch()
+        # Wrap em scroll para suportar janelas estreitas
+        scroll_controle = QScrollArea()
+        scroll_controle.setWidgetResizable(True)
+        scroll_controle.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll_controle.setWidget(tab_controle)
+        self._tabs.addTab(scroll_controle, "Controle de Versoes")
 
-        # ── INSTALAÇÃO / REMOÇÃO ──────────────────────────────────────────
-        lay.addWidget(SectionHeader("Instalar / Remover Portable"))
+        # -- ABA 2: Instalar / Remover -------------------------------------
+        tab_instalar = QWidget()
+        ilay = QVBoxLayout(tab_instalar)
+        ilay.setContentsMargins(0, 16, 0, 0)
+        ilay.setSpacing(10)
 
         nota = label(
             "Selecione a versão e use os botões para instalar ou remover o portable.",
             COLORS["text_dim"], 9,
         )
         nota.setWordWrap(True)
-        lay.addWidget(nota)
-        lay.addWidget(spacer(h=4))
+        ilay.addWidget(nota)
+        ilay.addWidget(spacer(h=4))
 
         self._radio_group = QButtonGroup(self)
         radio_row = QHBoxLayout()
@@ -733,15 +1205,15 @@ class PageFbPortable(QWidget):
             self._radio_group.addButton(rb)
             radio_row.addWidget(rb)
         radio_row.addStretch()
-        lay.addLayout(radio_row)
+        ilay.addLayout(radio_row)
 
         self._lbl_porta = label("", COLORS["text_dim"], 9)
-        lay.addWidget(self._lbl_porta)
-        lay.addWidget(spacer(h=4))
+        ilay.addWidget(self._lbl_porta)
+        ilay.addWidget(spacer(h=4))
 
         self._card_status = _StatusCard()
-        lay.addWidget(self._card_status)
-        lay.addWidget(spacer(h=6))
+        ilay.addWidget(self._card_status)
+        ilay.addWidget(spacer(h=6))
 
         self._btn_instalar = make_primary_btn("INSTALAR", 160)
         self._btn_instalar.clicked.connect(self._on_instalar)
@@ -749,24 +1221,68 @@ class PageFbPortable(QWidget):
         self._btn_remover.clicked.connect(self._on_remover)
         btn_voltar = make_secondary_btn("VOLTAR", 80)
         btn_voltar.clicked.connect(self.go_menu.emit)
-        lay.addWidget(btn_row(self._btn_instalar, self._btn_remover, btn_voltar))
+        ilay.addWidget(btn_row(self._btn_instalar, self._btn_remover, btn_voltar))
 
-        # Progresso / Alert / Console
-        lay.addWidget(spacer(h=6))
+        ilay.addWidget(spacer(h=6))
         self._progress = QProgressBar()
         self._progress.setRange(0, 100)
         self._progress.setValue(0)
         self._progress.setFixedHeight(8)
         self._progress.setTextVisible(False)
         self._progress.setVisible(False)
-        lay.addWidget(self._progress)
+        ilay.addWidget(self._progress)
 
         self._alert = AlertBox("", "info")
         self._alert.setVisible(False)
-        lay.addWidget(self._alert)
+        ilay.addWidget(self._alert)
 
-        self._console = _Console()
-        lay.addWidget(self._console)
+        ilay.addStretch()
+
+        self._tabs.addTab(tab_instalar, "Instalar / Remover")
+
+        # -- ABA 3: Banco de Dados -----------------------------------------
+        tab_db = QWidget()
+        dlay = QVBoxLayout(tab_db)
+        dlay.setContentsMargins(0, 16, 0, 0)
+        dlay.setSpacing(10)
+
+        nota_db = label(
+            "Configure quais bancos de dados o Firebird Portable irá expor. "
+            "Varre o HD, selecione o arquivo Dados e clique em Aplicar.",
+            COLORS["text_dim"], 9,
+        )
+        nota_db.setWordWrap(True)
+        dlay.addWidget(nota_db)
+        dlay.addWidget(spacer(h=4))
+
+        self._db_conf_card = _DatabasesConfCard()
+        dlay.addWidget(self._db_conf_card)
+        dlay.addStretch()
+
+        self._tabs.addTab(tab_db, "Banco de Dados")
+
+        # -- ABA 4: Logs ---------------------------------------------------
+        tab_log = QWidget()
+        llay = QVBoxLayout(tab_log)
+        llay.setContentsMargins(0, 8, 0, 0)
+        llay.setSpacing(6)
+
+        lbl_log = label(
+            "Registro de todas as operações realizadas nesta sessão.",
+            COLORS["text_dim"], 9,
+        )
+        lbl_log.setWordWrap(True)
+        llay.addWidget(lbl_log)
+
+        self._console = _Console(fixed_height=0)
+        llay.addWidget(self._console, 1)
+
+        # Botão limpar log
+        btn_limpar = make_secondary_btn("Limpar Log", 130)
+        btn_limpar.clicked.connect(self._console.limpar)
+        llay.addWidget(btn_limpar)
+
+        self._tabs.addTab(tab_log, "Logs")
 
         lay.addStretch()
         scroll.setWidget(inner)
@@ -786,8 +1302,6 @@ class PageFbPortable(QWidget):
 
         outra = "4" if versao == "3" else "3"
 
-        # Se está desativando e a outra não está ativa, apenas inativa
-        # Se está ativando, usa alternar_versao_ativa (para a outra automaticamente)
         if checked:
             lbl_alvo  = FB_CONFIGS[versao]["label"]
             lbl_outra = FB_CONFIGS[outra]["label"]
@@ -914,9 +1428,6 @@ class PageFbPortable(QWidget):
         st = status_detalhado()
         self._upd_toggle = True
 
-        fb3_rod = st["fb3"]["rodando"]
-        fb4_rod = st["fb4"]["rodando"]
-
         for versao in ("3", "4"):
             d       = st[f"fb{versao}"]
             inst    = d["instalado"]
@@ -926,24 +1437,21 @@ class PageFbPortable(QWidget):
 
             porta = FB_CONFIGS[versao]['porta']
             if d["servico_rod"]:
-                det = f"Serviço Windows  •  porta {porta}  •  rodando"
+                det = f"Serviço Windows - porta {porta} - rodando"
             elif d["processo_rod"]:
-                det = f"Processo portable  •  porta {porta}  •  rodando"
+                det = f"Processo portable - porta {porta} - rodando"
             elif inst and d["modo"] == "servico" and d["servico_reg"]:
-                det = f"Serviço Windows  •  porta {porta}  •  parado"
+                det = f"Serviço Windows - porta {porta} - parado"
             elif inst:
-                det = f"Processo portable  •  porta {porta}  •  parado"
+                det = f"Processo portable - porta {porta} - parado"
             else:
-                det = f"Processo portable  •  porta {porta}"
+                det = f"Processo portable - porta {porta}"
 
             if versao == "3" and d.get("servico_oficial_rod"):
-                det = f"Serviço oficial  •  porta {porta}  •  rodando"
+                det = f"Serviço oficial - porta {porta} - rodando"
 
             row.set_estado(rodando, inst, det)
             row.toggle.setChecked(rodando)
-
-            # Todos os toggles ficam habilitados se instalados —
-            # a alternância automática elimina a necessidade de bloquear.
             row.toggle.setAtivo(inst)
             row.toggle.setToolTip(
                 "Ativar esta versão irá desativar a outra automaticamente."
@@ -959,7 +1467,6 @@ class PageFbPortable(QWidget):
 
         self._upd_toggle = False
 
-        # Conflito só aparece se ambas subirem por algum meio externo
         if st["conflito"]:
             self._alerta(
                 "FB3 e FB4 estão ativos simultaneamente — isso pode causar conflitos.",
@@ -1075,18 +1582,55 @@ class PageFbPortable(QWidget):
         self._alert.setVisible(True)
 
     def _upd_style(self, _=""):
+        bg   = COLORS.get("surface",  "#1e1e1e")
+        bg2  = COLORS.get("bg",       "#121212")
+        brd  = COLORS.get("border",   "#444")
+        txt  = COLORS.get("text",     "#fff")
+        tmid = COLORS.get("text_mid", "#aaa")
+        acc  = COLORS.get("accent",   "#0078d4")
+
         self._progress.setStyleSheet(f"""
             QProgressBar {{
-                background:{COLORS.get('surface','#1e1e1e')};
+                background:{bg};
                 border:none; border-radius:4px;
             }}
             QProgressBar::chunk {{
-                background:{COLORS.get('accent','#0078d4')};
+                background:{acc};
                 border-radius:4px;
             }}
         """)
-        bg  = COLORS.get("surface", "#1e1e1e")
-        brd = COLORS.get("border",  "#444")
+
+        self._tabs.setStyleSheet(f"""
+            QTabWidget::pane {{
+                background:{bg};
+                border:1.5px solid {brd};
+                border-radius:8px;
+                padding:12px;
+            }}
+            QTabBar::tab {{
+                background:{bg2};
+                color:{tmid};
+                border:1px solid {brd};
+                border-bottom:none;
+                border-top-left-radius:6px;
+                border-top-right-radius:6px;
+                padding:8px 18px;
+                margin-right:3px;
+                font-family:{FONT_SANS};
+                font-size:10pt;
+            }}
+            QTabBar::tab:selected {{
+                background:{bg};
+                color:{txt};
+                border-bottom:2px solid {acc};
+                font-weight:bold;
+            }}
+            QTabBar::tab:hover:!selected {{
+                background:{bg};
+                color:{txt};
+            }}
+        """)
+
         try:
             self.findChild(QFrame, "toggles_frame").setStyleSheet(f"""
                 QFrame#toggles_frame {{

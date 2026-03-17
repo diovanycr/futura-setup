@@ -36,7 +36,7 @@ from ui.page_shutdown_online    import PageShutdownOnline
 from ui.page_utilitarios        import PageUtilitarios
 from ui.page_instalar_firebird  import PageInstalarFirebird
 from ui.page_verificar_versao_fdb import PageVerificarVersaoFdb
-from ui.page_fb_portable        import PageFbPortable          # novo
+from ui.page_fb_portable        import PageFbPortable
 from core.logger                import log
 from config                     import APP_VERSION
 
@@ -117,7 +117,7 @@ class LoginDialog(QDialog):
         lay.setContentsMargins(32, 32, 32, 32)
         lay.setSpacing(12)
 
-        titulo = QLabel("🔒  Futura Setup")
+        titulo = QLabel("Futura Setup")
         titulo.setFont(QFont(FONT_SANS, 15, QFont.Weight.Bold))
         titulo.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -227,7 +227,7 @@ class LoginDialog(QDialog):
             self._campo.setEnabled(True)
             self._btn.setEnabled(True)
             self._msg.setStyleSheet(f"color: {COLORS['text_mid']};")
-            self._msg.setText("Você pode tentar novamente.")
+            self._msg.setText("Voce pode tentar novamente.")
             self._campo.setFocus()
 
     def autenticado(self) -> bool:
@@ -251,7 +251,7 @@ class NavItem(QWidget):
         self._busy     = False
         self._callback = None
         self._spin_frame = 0
-        self._spin_frames = ["◐", "◓", "◑", "◒"]
+        self._spin_frames = ["\\", "|", "/", "-"]
         self._orig_icon  = icon
         self.setFixedHeight(36)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -390,7 +390,7 @@ class ThemeToggleBtn(QWidget):
 
     def _upd(self, _mode: str = ""):
         is_dark = theme_manager.mode == "dark"
-        self._icon.setText("🌙" if is_dark else "☀️")
+        self._icon.setText("*" if is_dark else "O")
         self._lbl.setText("Modo escuro" if is_dark else "Modo claro")
         self._icon.setStyleSheet("background: transparent;")
         self._lbl.setStyleSheet(f"color: {COLORS['text_mid']}; background: transparent;")
@@ -418,7 +418,7 @@ class FooterWidget(QWidget):
         lay.setSpacing(3)
 
         dot_color  = COLORS["accent2"] if IS_ADMIN else COLORS["warn"]
-        status_txt = "Administrador" if IS_ADMIN else "Usuário padrão"
+        status_txt = "Administrador" if IS_ADMIN else "Usuario padrao"
 
         row = QHBoxLayout()
         row.setSpacing(7)
@@ -461,7 +461,6 @@ class Sidebar(QWidget):
         self.setFixedWidth(220)
         self.setObjectName("Sidebar")
 
-        # Barra indicadora móvel
         self._active_bar = QWidget(self)
         self._active_bar.setFixedWidth(4)
         self._active_bar.setFixedHeight(24)
@@ -490,7 +489,7 @@ class Sidebar(QWidget):
         self._logo = QLabel("Futura Setup")
         self._logo.setFont(QFont(FONT_SANS, 15, QFont.Weight.Bold))
 
-        self._logo_sub = QLabel("Configuração de Terminal")
+        self._logo_sub = QLabel("Configuracao de Terminal")
         self._logo_sub.setFont(QFont(FONT_SANS, 11))
 
         header_lay.addWidget(self._logo)
@@ -502,16 +501,16 @@ class Sidebar(QWidget):
         inner_lay.addWidget(spacer(h=4))
 
         # -- Navegação principal --
-        self.nav_menu        = NavItem("Menu Principal",   "⊞")
-        self.nav_utilitarios = NavItem("Utilitários",      "🔧")
+        self.nav_menu        = NavItem("Menu Principal",   ">")
+        self.nav_utilitarios = NavItem("Utilitarios",      "#")
         inner_lay.addWidget(self.nav_menu)
         inner_lay.addWidget(self.nav_utilitarios)
 
         # -- Seção Operações --
-        inner_lay.addWidget(NavSectionLabel("Operações"))
-        self.nav_atalhos     = NavItem("Puxar via Rede",    "↓")
-        self.nav_terminal    = NavItem("Novo Terminal",     "□")
-        self.nav_atualizacao = NavItem("Atualizar Sistema", "↑")
+        inner_lay.addWidget(NavSectionLabel("Operacoes"))
+        self.nav_atalhos     = NavItem("Puxar via Rede",    "^")
+        self.nav_terminal    = NavItem("Novo Terminal",     "+")
+        self.nav_atualizacao = NavItem("Atualizar Sistema", "!")
         inner_lay.addWidget(self.nav_atalhos)
         inner_lay.addWidget(self.nav_terminal)
         inner_lay.addWidget(self.nav_atualizacao)
@@ -597,7 +596,7 @@ _IDX_SHUTDOWN_ONLINE      = 12
 _IDX_UTILITARIOS          = 13
 _IDX_INSTALAR_FIREBIRD    = 14
 _IDX_VERIFICAR_VERSAO_FDB = 15
-_IDX_FB_PORTABLE          = 16  # novo
+_IDX_FB_PORTABLE          = 16
 
 
 class MainWindow(QMainWindow):
@@ -636,7 +635,7 @@ class MainWindow(QMainWindow):
         self._page_utilitarios          = PageUtilitarios()
         self._page_instalar_firebird    = PageInstalarFirebird()
         self._page_verificar_versao_fdb = PageVerificarVersaoFdb()
-        self._page_fb_portable          = PageFbPortable()          # novo
+        self._page_fb_portable          = PageFbPortable()
 
         for p in [
             self._page_menu,                 # 0
@@ -655,7 +654,7 @@ class MainWindow(QMainWindow):
             self._page_utilitarios,          # 13
             self._page_instalar_firebird,    # 14
             self._page_verificar_versao_fdb, # 15
-            self._page_fb_portable,          # 16  novo
+            self._page_fb_portable,          # 16
         ]:
             self._stack.addWidget(p)
 
@@ -665,6 +664,8 @@ class MainWindow(QMainWindow):
         self._page_menu.go_atualizacao.connect(self._go_atualizacao)
         self._page_menu.go_restaurar.connect(self._go_restaurar)
         self._page_menu.go_log.connect(self._go_log)
+        self._page_menu.go_instalar_firebird.connect(self._go_instalar_firebird)
+        self._page_menu.go_fb_portable.connect(self._go_fb_portable)
 
         # -- Sinais da página Utilitários --
         self._page_utilitarios.go_log.connect(self._go_log)
@@ -674,9 +675,7 @@ class MainWindow(QMainWindow):
         self._page_utilitarios.go_editar_func.connect(self._go_editar_func)
         self._page_utilitarios.go_implantar_mobile.connect(self._go_implantar_mobile)
         self._page_utilitarios.go_shutdown_online.connect(self._go_shutdown_online)
-        self._page_utilitarios.go_instalar_firebird.connect(self._go_instalar_firebird)
         self._page_utilitarios.go_verificar_versao_fdb.connect(self._go_verificar_versao_fdb)
-        self._page_utilitarios.go_fb_portable.connect(self._go_fb_portable)     # novo
 
         # -- Sinais do scan --
         self._page_scan.servidor_selecionado.connect(self._on_servidor)
@@ -694,9 +693,9 @@ class MainWindow(QMainWindow):
         self._page_editar_func.go_menu.connect(self._go_utilitarios)
         self._page_implantar_mobile.go_menu.connect(self._go_utilitarios)
         self._page_shutdown_online.go_menu.connect(self._go_utilitarios)
-        self._page_instalar_firebird.go_menu.connect(self._go_utilitarios)
+        self._page_instalar_firebird.go_menu.connect(self._go_menu)
         self._page_verificar_versao_fdb.go_menu.connect(self._go_utilitarios)
-        self._page_fb_portable.go_menu.connect(self._go_utilitarios)            # novo
+        self._page_fb_portable.go_menu.connect(self._go_menu)
 
         # -- Sidebar clicks --
         self._sidebar.nav_menu.on_click(lambda: self._navigate(self._go_menu))
@@ -768,7 +767,7 @@ class MainWindow(QMainWindow):
             self._page_shutdown_online,
             self._page_instalar_firebird,
             self._page_verificar_versao_fdb,
-            self._page_fb_portable,          # novo
+            self._page_fb_portable,
         ]
 
     def _get_active_workers(self) -> list:
@@ -801,9 +800,9 @@ class MainWindow(QMainWindow):
                 self._page_editar_func:          self._sidebar.nav_utilitarios,
                 self._page_implantar_mobile:     self._sidebar.nav_utilitarios,
                 self._page_shutdown_online:      self._sidebar.nav_utilitarios,
-                self._page_instalar_firebird:    self._sidebar.nav_utilitarios,
+                self._page_instalar_firebird:    self._sidebar.nav_menu,
                 self._page_verificar_versao_fdb: self._sidebar.nav_utilitarios,
-                self._page_fb_portable:          self._sidebar.nav_utilitarios,  # novo
+                self._page_fb_portable:          self._sidebar.nav_menu,
             }
         return self._page_nav_map
 
@@ -834,7 +833,7 @@ class MainWindow(QMainWindow):
         else:
             fn()
 
-    # -- NAVEGAÇÃO -------------------------------------------------------------
+    # -- NAVEGACAO -------------------------------------------------------------
 
     def _go_menu(self):
         self._show(_IDX_MENU, self._sidebar.nav_menu)
@@ -880,15 +879,15 @@ class MainWindow(QMainWindow):
 
     def _go_instalar_firebird(self):
         self._page_instalar_firebird.reset()
-        self._show(_IDX_INSTALAR_FIREBIRD, self._sidebar.nav_utilitarios)
+        self._show(_IDX_INSTALAR_FIREBIRD, self._sidebar.nav_menu)
 
     def _go_verificar_versao_fdb(self):
         self._page_verificar_versao_fdb.reset()
         self._show(_IDX_VERIFICAR_VERSAO_FDB, self._sidebar.nav_utilitarios)
 
-    def _go_fb_portable(self):                                                   # novo
+    def _go_fb_portable(self):
         self._page_fb_portable.reset()
-        self._show(_IDX_FB_PORTABLE, self._sidebar.nav_utilitarios)
+        self._show(_IDX_FB_PORTABLE, self._sidebar.nav_menu)
 
     def _start_atalhos(self):
         self._flow_mode = "atalhos"

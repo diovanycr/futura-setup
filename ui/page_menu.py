@@ -134,11 +134,13 @@ class ActionButton(QWidget):
 
 
 class PageMenu(QWidget):
-    go_atalhos     = pyqtSignal()
-    go_terminal    = pyqtSignal()
-    go_atualizacao = pyqtSignal()
-    go_log         = pyqtSignal()
-    go_restaurar   = pyqtSignal()
+    go_atalhos           = pyqtSignal()
+    go_terminal          = pyqtSignal()
+    go_atualizacao       = pyqtSignal()
+    go_log               = pyqtSignal()
+    go_restaurar         = pyqtSignal()
+    go_instalar_firebird = pyqtSignal()
+    go_fb_portable       = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -155,13 +157,19 @@ class PageMenu(QWidget):
         items = [
             ("01", "Puxar via Rede",
              "Cria atalhos que executam os aplicativos direto do servidor",
-             COLORS["accent"],  self.go_atalhos),
+             COLORS["accent"], self.go_atalhos),
             ("02", "Novo Terminal",
-             "Copia os arquivos para este PC e configura um terminal autônomo",
-             COLORS["accent"],  self.go_terminal),
+             "Copia os arquivos para este PC e configura um terminal autonomo",
+             COLORS["accent"], self.go_terminal),
             ("03", "Atualizar Sistema",
-             "Baixa e executa a atualização completa do ERP Futura",
-             COLORS["accent"],  self.go_atualizacao),
+             "Baixa e executa a atualizacao completa do ERP Futura",
+             COLORS["accent"], self.go_atualizacao),
+            ("04", "Instalar Firebird",
+             "Baixa e instala o Firebird 3 ou 4 silenciosamente",
+             COLORS["accent2"], self.go_instalar_firebird),
+            ("05", "Firebird Portable",
+             "Instala e configura FB3 e FB4 portable de forma independente",
+             COLORS["accent2"], self.go_fb_portable),
         ]
 
         for num, title, desc, accent, sig in items:

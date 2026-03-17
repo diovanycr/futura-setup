@@ -138,9 +138,7 @@ class PageUtilitarios(QWidget):
     go_editar_func          = pyqtSignal()
     go_implantar_mobile     = pyqtSignal()
     go_shutdown_online      = pyqtSignal()
-    go_instalar_firebird    = pyqtSignal()
     go_verificar_versao_fdb = pyqtSignal()
-    go_fb_portable          = pyqtSignal()  # novo
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -148,7 +146,7 @@ class PageUtilitarios(QWidget):
         lay.setContentsMargins(40, 36, 40, 36)
         lay.setSpacing(0)
 
-        lay.addWidget(PageTitle("UTILITÁRIOS", "Ferramentas auxiliares do sistema"))
+        lay.addWidget(PageTitle("UTILITARIOS", "Ferramentas auxiliares do sistema"))
 
         btn_lay = QVBoxLayout()
         btn_lay.setSpacing(12)
@@ -156,7 +154,7 @@ class PageUtilitarios(QWidget):
 
         items = [
             ("01", "Ver Log",
-             "Visualiza o histórico de operações e eventos do sistema",
+             "Visualiza o historico de operacoes e eventos do sistema",
              COLORS["accent2"], self.go_log),
             ("02", "Backup / Restaurar DB",
              "Gera ou restaura backup do banco de dados Firebird (.gbak)",
@@ -164,27 +162,21 @@ class PageUtilitarios(QWidget):
             ("03", "Firewall — Portas",
              "Abre ou fecha portas no firewall do Windows",
              COLORS["accent2"], self.go_port_opener),
-            ("04", "Diagnóstico",
-             "Testa conectividade, share, Firebird e versão de um servidor",
+            ("04", "Diagnostico",
+             "Testa conectividade, share, Firebird e versao de um servidor",
              COLORS["accent2"], self.go_diagnostico),
-            ("05", "Editar Funcionário",
-             "Altera dados de login e senha de funcionários no banco",
+            ("05", "Editar Funcionario",
+             "Altera dados de login e senha de funcionarios no banco",
              COLORS["accent2"], self.go_editar_func),
             ("06", "Implantar Mobile",
-             "Configura e implanta o módulo mobile no servidor",
+             "Configura e implanta o modulo mobile no servidor",
              COLORS["accent2"], self.go_implantar_mobile),
             ("07", "Shutdown / Online",
              "Encerra ou coloca o sistema online remotamente",
              COLORS["accent2"], self.go_shutdown_online),
-            ("08", "Instalar Firebird",
-             "Baixa e instala o Firebird 3 ou 4 silenciosamente",
-             COLORS["accent2"], self.go_instalar_firebird),
-            ("09", "Verificar Versão .fdb",
-             "Detecta a versão do Firebird e valida a integridade do arquivo",
+            ("08", "Verificar Versao .fdb",
+             "Detecta a versao do Firebird e valida a integridade do arquivo",
              COLORS["accent2"], self.go_verificar_versao_fdb),
-            ("10", "FB4 Portable",
-             "Instala o Firebird 4 lado a lado com o FB3, sem conflitos",
-             COLORS["accent2"], self.go_fb_portable),  # novo
         ]
 
         for num, title, desc, accent, sig in items:

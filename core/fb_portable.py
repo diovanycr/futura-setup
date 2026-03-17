@@ -2,7 +2,7 @@
 # FUTURA SETUP — Core: Firebird Portable Manager
 #
 # FB3 → processo portable (porta 3050) OU serviço Windows registrado
-# FB4 → processo portable (porta 3051) OU serviço Windows registrado
+# FB4 → processo portable (porta 3050) OU serviço Windows registrado
 #
 # Salvar em: core/fb_portable.py
 # =============================================================================
@@ -74,13 +74,26 @@ FB_CONFIGS = {
             "v4.0.6/Firebird-4.0.6.3221-0-x64.zip"
         ),
         "zip_size":     23 * 1024 * 1024,
-        "porta":        3051,
+        "porta":        3050,
         "label":        "Firebird 4 Portable",
         "security_db":  "security4.fdb",
         "servicos_win_oficiais": [],
         "servico_nome": "FuturaFirebirdFB4",
     },
 }
+
+# Credenciais padrão do Futura
+_FB_USER     = "SYSDBA"
+_FB_PASSWORD = "sbofutura"
+
+# Senhas padrão de fábrica do Firebird
+_SENHAS_FABRICA = ["masterkey", "masterke", ""]
+
+# URL do instalador oficial do FB3 (necessário para gerar o security3.fdb correto)
+_FB3_INSTALLER_URL = (
+    "https://github.com/FirebirdSQL/firebird/releases/download/"
+    "v3.0.13/Firebird-3.0.13.33818-0-x64.exe"
+)
 
 FB4_DIR  = FB_CONFIGS["4"]["dir"]
 FB4_GFIX = os.path.join(FB4_DIR, "gfix.exe")
@@ -99,7 +112,6 @@ _SERVIDOR_SUBDIRS    = ["", "bin"]
 # =============================================================================
 
 def _gerar_wrapper(versao: str, fbserver: str, log_fn=None) -> str | None:
-    """Gera fb_svc_wrapper.py no diretório do FB. Retorna o caminho ou None."""
     def log(m):
         if log_fn: log_fn(m)
 
@@ -114,7 +126,6 @@ def _gerar_wrapper(versao: str, fbserver: str, log_fn=None) -> str | None:
 
     linhas = [
         "# AUTO-GERADO pelo Futura Setup --- NAO EDITE MANUALMENTE",
-        "# Wrapper pywin32: roda fbserver.exe como servico Windows nativo.",
         "import subprocess, sys, os",
         "import win32serviceutil, win32service, win32event, servicemanager",
         "",
@@ -202,10 +213,6 @@ def _wrapper_path(versao: str) -> str:
 
 
 def _servico_binpath_valido(versao: str) -> bool:
-    """
-    Verifica se o binPath do serviço registrado aponta para o diretório
-    correto da versão. Impede que FB3 e FB4 compartilhem o mesmo serviço.
-    """
     nome   = FB_CONFIGS[versao]["servico_nome"]
     fb_dir = FB_CONFIGS[versao]["dir"].lower()
     try:
@@ -250,25 +257,23 @@ def _encontrar_exe(versao: str, nomes: list[str]) -> str | None:
                 return p
     return None
 
-
 def _encontrar_servidor(versao: str) -> str | None:
     return _encontrar_exe(versao, _SERVIDOR_CANDIDATOS)
-
 
 def _encontrar_instsvc(versao: str) -> str | None:
     return _encontrar_exe(versao, _INSTSVC_CANDIDATOS)
 
-
 def _encontrar_gfix(versao: str) -> str | None:
     return _encontrar_exe(versao, ["gfix.exe"])
-
 
 def _encontrar_gbak(versao: str) -> str | None:
     return _encontrar_exe(versao, ["gbak.exe"])
 
-
 def _encontrar_isql(versao: str) -> str | None:
     return _encontrar_exe(versao, ["isql.exe"])
+
+def _encontrar_gsec(versao: str) -> str | None:
+    return _encontrar_exe(versao, ["gsec.exe"])
 
 
 def diagnosticar_instalacao(versao: str = "4") -> dict:
@@ -327,8 +332,8 @@ def versao_fb3_portable() -> str: return versao_fb_portable("3")
 # Inicialização do Security Database
 # =============================================================================
 
-def _security_db_path(versao: str) -> str | None:
-    """Retorna o caminho do security database da versão, ou None se não encontrado."""
+def _security_db_path(versao: str) -> str:
+    """Retorna o caminho do security DB (exista ou não)."""
     cfg    = FB_CONFIGS[versao]
     fb_dir = cfg["dir"]
     nome   = cfg["security_db"]
@@ -337,116 +342,581 @@ def _security_db_path(versao: str) -> str | None:
         p    = os.path.join(base, nome)
         if os.path.isfile(p):
             return p
-    return None
+    return os.path.join(fb_dir, nome)
 
 
-def _security_db_inicializado(versao: str) -> bool:
+def _security_db_incompleto(versao: str) -> bool:
     """
-    Verifica se o security database existe e tem tamanho razoável (>= 64 KB).
-    Um arquivo menor indica que foi criado vazio / corrompido.
+    Verifica funcionalmente se o security DB está no estado 'Install incomplete'
+    (arquivo existe e tem tamanho, mas o SYSDBA não foi provisionado).
+    Usa gsec -list sem servidor em execução.
     """
-    p = _security_db_path(versao)
-    if not p:
+    gsec     = _encontrar_gsec(versao)
+    sec_path = _security_db_path(versao)
+    fb_dir   = FB_CONFIGS[versao]["dir"]
+
+    if not gsec or not os.path.isfile(sec_path):
         return False
+
+    env = os.environ.copy()
+    env["FIREBIRD"] = fb_dir
+
     try:
-        return os.path.getsize(p) >= 64 * 1024
+        r = subprocess.run(
+            [gsec, "-database", sec_path, "-user", _FB_USER,
+             "-password", "masterkey", "-list"],
+            cwd=fb_dir, env=env,
+            capture_output=True, text=True,
+            encoding="utf-8", errors="ignore", timeout=10,
+        )
+        saida = (r.stdout + r.stderr).lower()
+        return "install incomplete" in saida
     except Exception:
         return False
 
 
-def inicializar_security_db(versao: str, log_fn=None) -> bool:
+def _security_db_ok(versao: str) -> bool:
     """
-    Inicializa o security database do Firebird portable via 'firebird.exe -i'.
-    Necessário em instalações via zip (sem o instalador oficial).
+    True se o security DB existe, tem tamanho real (>= 512 KB)
+    e NÃO está no estado 'Install incomplete'.
+    Arquivos menores foram criados incorretamente e devem ser descartados.
+    O arquivo do instalador oficial tem ~1.6-1.7 MB.
+    """
+    p = _security_db_path(versao)
+    if not os.path.isfile(p):
+        return False
+    try:
+        if os.path.getsize(p) < 512 * 1024:
+            return False
+    except Exception:
+        return False
+    # Arquivo existe e tem tamanho correto — verifica se está funcional
+    return not _security_db_incompleto(versao)
 
-    Estratégia:
-      1. Sobe o servidor em modo embedded/application temporariamente
-      2. Aguarda o security DB ser criado
-      3. Encerra o processo temporário
 
-    Retorna True se o security DB ficou ok.
+def _flag_sysdba_path(versao: str) -> str:
+    return os.path.join(FB_CONFIGS[versao]["dir"], f".fb{versao}_sysdba_ok")
+
+
+def _sysdba_configurado(versao: str) -> bool:
+    return os.path.isfile(_flag_sysdba_path(versao))
+
+
+def _marcar_sysdba_ok(versao: str):
+    try:
+        open(_flag_sysdba_path(versao), "w").close()
+    except Exception:
+        pass
+
+
+def _contem_erro_fatal(saida: str) -> bool:
+    """Retorna True se a saída contém erro real (ignora warnings de configuração)."""
+    s = saida.lower()
+    for trecho in ["install incomplete", "please read", "compatibility", "release notes"]:
+        s = s.replace(trecho, "")
+    return any(k in s for k in ["error", "failed", "invalid", "denied", "cannot", "unable"])
+
+
+def _parar_e_remover_fb3_oficial(log_fn=None):
+    """
+    Para e desinstala o FB3 oficial caso tenha sido instalado pelo instalador.
+    Chamado após copiar o security3.fdb para não deixar serviço residual.
     """
     def log(m):
         if log_fn: log_fn(m)
 
-    if _security_db_inicializado(versao):
-        log(f"  Security database FB{versao} já inicializado.")
-        return True
+    # Para todos os serviços oficiais conhecidos
+    servicos = [
+        "FirebirdServerDefaultInstance",
+        "FirebirdGuardianDefaultInstance",
+        "FirebirdServer",
+        "Firebird",
+    ]
+    for svc in servicos:
+        if _servico_existe(svc):
+            log(f"  [FB3] Parando serviço oficial '{svc}' ...")
+            subprocess.run(["net", "stop", svc], capture_output=True, timeout=20)
+            time.sleep(2)
 
-    servidor = _encontrar_servidor(versao)
-    if not servidor:
-        log(f"  ERRO: servidor FB{versao} não encontrado para inicializar security DB.")
+    # Mata processos residuais do FB3 oficial (em Program Files)
+    pf = r"C:\Program Files\Firebird\Firebird_3_0".lower()
+    pf86 = r"C:\Program Files (x86)\Firebird\Firebird_3_0".lower()
+    for nome_exe in ["firebird.exe", "fbserver.exe", "fbguard.exe"]:
+        try:
+            r = subprocess.run(
+                ["wmic", "process", "where", f"name='{nome_exe}'",
+                 "get", "ExecutablePath,ProcessId", "/FORMAT:CSV"],
+                capture_output=True, text=True, timeout=8,
+            )
+            for linha in r.stdout.splitlines():
+                linha_l = linha.lower()
+                if pf in linha_l or pf86 in linha_l:
+                    partes = linha.split(",")
+                    if len(partes) >= 3:
+                        pid = partes[-1].strip()
+                        if pid.isdigit():
+                            log(f"  [FB3] Encerrando processo oficial {nome_exe} (PID {pid}) ...")
+                            subprocess.run(["taskkill", "/F", "/PID", pid],
+                                           capture_output=True, timeout=10)
+        except Exception:
+            pass
+    time.sleep(2)
+
+    # Tenta desinstalar silenciosamente via unins000.exe
+    unins_candidatos = [
+        r"C:\Program Files\Firebird\Firebird_3_0\unins000.exe",
+        r"C:\Program Files (x86)\Firebird\Firebird_3_0\unins000.exe",
+    ]
+    for unins in unins_candidatos:
+        if os.path.isfile(unins):
+            log(f"  [FB3] Desinstalando FB3 oficial ({unins}) ...")
+            try:
+                subprocess.run(
+                    [unins, "/VERYSILENT", "/NORESTART"],
+                    capture_output=True, timeout=60,
+                )
+                time.sleep(3)
+                log("  [FB3] FB3 oficial desinstalado.")
+            except Exception as e:
+                log(f"  [FB3] Desinstalação falhou: {e}")
+            break
+
+    # Remove pasta residual se ainda existir
+    for pasta in [
+        r"C:\Program Files\Firebird\Firebird_3_0",
+        r"C:\Program Files (x86)\Firebird\Firebird_3_0",
+    ]:
+        if os.path.isdir(pasta):
+            try:
+                shutil.rmtree(pasta, ignore_errors=True)
+                log(f"  [FB3] Pasta removida: {pasta}")
+            except Exception:
+                pass
+
+
+def _obter_security3_fdb_via_instalador(log_fn=None) -> bool:
+    """
+    FB3: obtém o security3.fdb correto via instalador oficial.
+
+    O zip portable do FB3 inclui um security3.fdb com tamanho ~1.6MB mas no
+    estado 'Install incomplete' — sem SYSDBA provisionado. O arquivo correto
+    (~1.7MB) só é gerado pelo instalador oficial .exe.
+
+    IMPORTANTE: usa threshold de 1.5MB para distinguir o arquivo correto
+    (instalador oficial >= 1.7MB) do arquivo inválido do zip (~1.6MB mas
+    que passa em checagens de tamanho menores).
+
+    Fluxo:
+      1. Verifica se já existe instalação oficial em Program Files → copia
+      2. Se não, baixa o instalador .exe (~10MB) e executa silenciosamente
+         (o instalador ignora /DIR e sempre instala em Program Files)
+      3. Copia o security3.fdb de Program Files para C:\\FuturaFirebird\\FB3\\
+      4. Para e desinstala o FB3 oficial que foi instalado no passo 2
+    """
+    def log(m):
+        if log_fn: log_fn(m)
+
+    fb_dir   = FB_CONFIGS["3"]["dir"]
+    dst_path = os.path.join(fb_dir, "security3.fdb")
+
+    _CANDIDATOS_SISTEMA = [
+        r"C:\Program Files\Firebird\Firebird_3_0\security3.fdb",
+        r"C:\Program Files (x86)\Firebird\Firebird_3_0\security3.fdb",
+    ]
+
+    def _copiar_de_program_files() -> bool:
+        for src in _CANDIDATOS_SISTEMA:
+            if os.path.isfile(src) and os.path.getsize(src) >= 1_500_000:
+                log(f"  [FB3] security3.fdb encontrado: {src} ({os.path.getsize(src):,} bytes)")
+                try:
+                    shutil.copy2(src, dst_path)
+                    log(f"  [FB3] Copiado para FB3 dir ({os.path.getsize(dst_path):,} bytes).")
+                    return True
+                except Exception as e:
+                    log(f"    cópia falhou: {e}")
         return False
 
-    fb_dir   = os.path.dirname(servidor)
-    cfg      = FB_CONFIGS[versao]
-    sec_nome = cfg["security_db"]
+    # ── Passo 1: instalação oficial já existente no sistema ──────────────
+    if _copiar_de_program_files():
+        return True
+    # ─────────────────────────────────────────────────────────────────────
 
-    log(f"  Inicializando security database ({sec_nome}) ...")
+    # ── Passo 2: baixa e executa o instalador oficial ────────────────────
+    log("  [FB3] Instalação oficial não encontrada — baixando instalador FB3 (~10MB) ...")
+    installer_path = os.path.join(tempfile.gettempdir(), "fb3_setup_futura.exe")
 
-    # Tenta via 'firebird.exe -i' (inicializa o DB de segurança e encerra)
+    instalador_executado = False
+    try:
+        req = urllib.request.Request(
+            _FB3_INSTALLER_URL,
+            headers={"User-Agent": "FuturaSetup/4.3"}
+        )
+        with urllib.request.urlopen(req, timeout=90) as resp:
+            with open(installer_path, "wb") as f:
+                shutil.copyfileobj(resp, f)
+        log(f"  [FB3] Instalador baixado ({os.path.getsize(installer_path):,} bytes).")
+
+        log("  [FB3] Executando instalador silenciosamente ...")
+        subprocess.run(
+            [installer_path, "/VERYSILENT", "/NOICONS", '/TASKS=""', "/NORESTART"],
+            capture_output=True, timeout=120,
+        )
+        instalador_executado = True
+        time.sleep(5)
+
+        # ── Passo 3: copia o security3.fdb de Program Files ──────────────
+        if _copiar_de_program_files():
+            return True
+
+        log("  [FB3] security3.fdb não encontrado após instalação.")
+
+    except Exception as e:
+        log(f"  [FB3] Erro ao obter security3.fdb via instalador: {e}")
+    finally:
+        try:
+            if os.path.isfile(installer_path):
+                os.remove(installer_path)
+        except Exception:
+            pass
+        # ── Passo 4: para e desinstala o FB3 oficial instalado ───────────
+        if instalador_executado:
+            log("  [FB3] Removendo FB3 oficial instalado temporariamente ...")
+            _parar_e_remover_fb3_oficial(log_fn)
+
+    return False
+
+
+def _configurar_sysdba_fb3_via_gsec(log_fn=None) -> bool:
+    """
+    FB3: altera a senha do SYSDBA via gsec -database.
+    Funciona sem servidor rodando, direto no arquivo.
+    Requer que o security3.fdb seja o arquivo real do instalador oficial.
+    """
+    def log(m):
+        if log_fn: log_fn(m)
+
+    gsec     = _encontrar_gsec("3")
+    sec_path = _security_db_path("3")
+    fb_dir   = FB_CONFIGS["3"]["dir"]
+
+    if not gsec:
+        log("  [FB3] gsec.exe não encontrado.")
+        return False
+    if not os.path.isfile(sec_path):
+        log("  [FB3] security3.fdb não encontrado.")
+        return False
+
+    env = os.environ.copy()
+    env["FIREBIRD"] = fb_dir
+
+    log("  [FB3] Configurando SYSDBA via gsec -database ...")
+
+    for senha_atual in _SENHAS_FABRICA:
+        cmd = [gsec, "-database", sec_path, "-user", _FB_USER]
+        if senha_atual:
+            cmd += ["-password", senha_atual]
+        cmd += ["-modify", _FB_USER, "-pw", _FB_PASSWORD]
+
+        try:
+            r = subprocess.run(
+                cmd, cwd=fb_dir, env=env,
+                capture_output=True, text=True,
+                encoding="utf-8", errors="ignore", timeout=15,
+            )
+            saida = (r.stdout + r.stderr).strip()
+            if saida:
+                log(f"    gsec (pw={senha_atual!r}): {saida[:200]}")
+            if r.returncode == 0 and not _contem_erro_fatal(saida):
+                log(f"  [FB3] SYSDBA configurado (senha anterior: {senha_atual!r}).")
+                return True
+        except Exception as e:
+            log(f"    gsec erro: {e}")
+
+    return False
+
+
+def _configurar_sysdba_fb4_via_gsec(log_fn=None) -> bool:
+    """
+    FB4: tenta configurar SYSDBA via gsec -database (sem servidor).
+    Na prática o FB4 portable não suporta bem esse modo — use
+    _inicializar_security_fb4_via_isql_embedded como método principal.
+    Mantido como fallback para compatibilidade.
+    """
+    def log(m):
+        if log_fn: log_fn(m)
+
+    gsec     = _encontrar_gsec("4")
+    sec_path = _security_db_path("4")
+    fb_dir   = FB_CONFIGS["4"]["dir"]
+
+    if not gsec or not os.path.isfile(sec_path):
+        return False
+
+    env = os.environ.copy()
+    env["FIREBIRD"] = fb_dir
+
+    for senha_atual in _SENHAS_FABRICA:
+        cmd = [gsec, "-database", sec_path, "-user", _FB_USER]
+        if senha_atual:
+            cmd += ["-password", senha_atual]
+        cmd += ["-modify", _FB_USER, "-pw", _FB_PASSWORD]
+        try:
+            r = subprocess.run(
+                cmd, cwd=fb_dir, env=env,
+                capture_output=True, text=True,
+                encoding="utf-8", errors="ignore", timeout=15,
+            )
+            saida = (r.stdout + r.stderr).strip()
+            if saida:
+                log(f"    gsec FB4 (pw={senha_atual!r}): {saida[:200]}")
+            if r.returncode == 0 and not _contem_erro_fatal(saida):
+                log(f"  [FB4] SYSDBA configurado via gsec.")
+                return True
+        except Exception as e:
+            log(f"    gsec FB4 erro: {e}")
+    return False
+
+
+def _inicializar_security_fb4_via_isql_embedded(log_fn=None) -> bool:
+    """
+    FB4: inicializa o security4.fdb do zero via isql embedded.
+
+    O zip portable do FB4 inclui um security4.fdb no estado 'Install incomplete'.
+    A solução correta conforme README.security_database.txt do FB4:
+      1. Para o servidor se estiver rodando
+      2. Deleta o security4.fdb inválido
+      3. Cria um novo security4.fdb via isql embedded (CREATE DATABASE)
+      4. Conecta nele e executa CREATE USER SYSDBA PASSWORD '...'
+
+    Não requer servidor rodando — usa conexão embedded direta no arquivo.
+    """
+    def log(m):
+        if log_fn: log_fn(m)
+
+    isql   = _encontrar_isql("4")
+    fb_dir = FB_CONFIGS["4"]["dir"]
+    sec_path = os.path.join(fb_dir, "security4.fdb")
+
+    if not isql:
+        log("  [FB4] isql.exe não encontrado.")
+        return False
+
+    env = os.environ.copy()
+    env["FIREBIRD"] = fb_dir
+
+    # Passo 1: remove security4.fdb inválido
+    if os.path.isfile(sec_path):
+        log("  [FB4] Removendo security4.fdb inválido ...")
+        try:
+            os.remove(sec_path)
+        except Exception as e:
+            log(f"    falha ao remover: {e}")
+            return False
+
+    # Passo 2: cria novo security4.fdb via isql embedded + CREATE USER
+    log("  [FB4] Criando security4.fdb e usuário SYSDBA via isql embedded ...")
+    sql = (
+        f"CREATE DATABASE '{sec_path}';\n"
+        f"CREATE USER {_FB_USER} PASSWORD '{_FB_PASSWORD}';\n"
+        "EXIT;\n"
+    )
     try:
         r = subprocess.run(
-            [servidor, "-i"],
-            cwd=fb_dir,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="ignore",
+            [isql, "-user", _FB_USER],
+            input=sql,
+            cwd=fb_dir, env=env,
+            capture_output=True, text=True,
+            encoding="utf-8", errors="ignore",
             timeout=30,
         )
         saida = (r.stdout + r.stderr).strip()
         if saida:
-            log(f"    firebird -i: {saida[:300]}")
-    except subprocess.TimeoutExpired:
-        log("    firebird -i timeout — continuando...")
-    except Exception as e:
-        log(f"    firebird -i erro: {e}")
+            log(f"    isql embedded: {saida[:300]}")
 
-    # Aguarda até 10s o arquivo aparecer com tamanho adequado
-    for _ in range(10):
-        time.sleep(1)
-        if _security_db_inicializado(versao):
-            log(f"  Security database inicializado com sucesso.")
-            return True
+        # Verifica se o arquivo foi criado
+        if not os.path.isfile(sec_path):
+            log("  [FB4] security4.fdb não foi criado.")
+            return False
 
-    # Fallback: sobe como processo application (-a) temporariamente
-    # para forçar a criação do security DB no primeiro boot
-    log("  Fallback: subindo servidor temporariamente para criar security DB ...")
-    try:
-        proc_tmp = subprocess.Popen(
-            [servidor, "-a"],
-            cwd=fb_dir,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+        # Verifica se o SYSDBA foi criado conectando no arquivo
+        r2 = subprocess.run(
+            [isql, "-user", _FB_USER, "-password", _FB_PASSWORD, sec_path],
+            input="SELECT SEC$USER_NAME FROM SEC$USERS;\nEXIT;\n",
+            cwd=fb_dir, env=env,
+            capture_output=True, text=True,
+            encoding="utf-8", errors="ignore",
+            timeout=15,
         )
-        for _ in range(15):
-            time.sleep(1)
-            if _security_db_inicializado(versao):
-                log("  Security database criado pelo servidor temporário.")
-                try:
-                    proc_tmp.terminate()
-                    proc_tmp.wait(timeout=5)
-                except Exception:
-                    pass
-                return True
+        saida2 = (r2.stdout + r2.stderr)
+        if "SYSDBA" in saida2.upper():
+            log(f"  [FB4] security4.fdb criado com SYSDBA ({os.path.getsize(sec_path):,} bytes).")
+            return True
+        else:
+            log(f"  [FB4] SYSDBA não encontrado no security4.fdb: {saida2[:200]}")
+            return False
+
+    except Exception as e:
+        log(f"  [FB4] isql embedded erro: {e}")
+        return False
+
+
+def _configurar_sysdba_fb4_via_isql(log_fn=None) -> bool:
+    """
+    FB4: o security4.fdb já vem no zip com masterkey.
+    Sobe o servidor temporariamente e altera a senha via isql TCP.
+    Usado como fallback quando gsec -database não funciona.
+    """
+    def log(m):
+        if log_fn: log_fn(m)
+
+    isql     = _encontrar_isql("4")
+    servidor = _encontrar_servidor("4")
+    sec_path = _security_db_path("4")
+    porta    = FB_CONFIGS["4"]["porta"]
+    fb_dir   = FB_CONFIGS["4"]["dir"]
+
+    if not isql or not servidor:
+        log("  [FB4] isql.exe ou servidor não encontrado.")
+        return False
+
+    log("  [FB4] Configurando SYSDBA via isql TCP ...")
+
+    proc_tmp = None
+    if not _processo_rodando("4"):
+        log("  [FB4] Subindo servidor temporário ...")
+        env = os.environ.copy()
+        env["FIREBIRD"] = fb_dir
+        try:
+            proc_tmp = subprocess.Popen(
+                [servidor, "-a"], cwd=fb_dir,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                env=env,
+            )
+            time.sleep(5)
+        except Exception as e:
+            log(f"    servidor temp erro: {e}")
+
+    ok = False
+    for senha_atual in ["masterkey", "masterke"]:
+        sql = f"ALTER USER {_FB_USER} PASSWORD '{_FB_PASSWORD}';\nCOMMIT;\nQUIT;\n"
+        try:
+            r = subprocess.run(
+                [
+                    isql,
+                    f"localhost/{porta}:{sec_path}",
+                    "-user", _FB_USER,
+                    "-password", senha_atual,
+                ],
+                input=sql, cwd=fb_dir,
+                capture_output=True, text=True,
+                encoding="utf-8", errors="ignore", timeout=20,
+            )
+            saida = (r.stdout + r.stderr).strip()
+            if saida:
+                log(f"    isql FB4 (pw={senha_atual!r}): {saida[:200]}")
+            if r.returncode == 0 and not _contem_erro_fatal(saida):
+                log(f"  [FB4] SYSDBA configurado (senha anterior: {senha_atual!r}).")
+                ok = True
+                break
+        except Exception as e:
+            log(f"    isql FB4 erro: {e}")
+
+    if proc_tmp:
         try:
             proc_tmp.terminate()
             proc_tmp.wait(timeout=5)
         except Exception:
             pass
-    except Exception as e:
-        log(f"  Fallback erro: {e}")
 
-    # Última tentativa: verifica se o arquivo existe (mesmo pequeno)
-    p = _security_db_path(versao)
-    if p and os.path.isfile(p):
-        sz = os.path.getsize(p)
-        log(f"  Security database existe ({sz} bytes) — pode estar incompleto.")
-        return sz > 0
+    return ok
 
-    log("  AVISO: não foi possível inicializar o security database.")
-    return False
+
+def inicializar_security_db(versao: str, log_fn=None) -> bool:
+    """
+    Garante que o security database existe e o SYSDBA tem a senha correta.
+    Chamado na instalação e antes de cada ativação.
+
+    FB3:
+      1. Obtém o security3.fdb correto via instalador oficial
+         (copia de instalação existente OU baixa e extrai o .exe)
+      2. Configura SYSDBA via gsec -database (sem precisar de servidor)
+
+    FB4:
+      1. Remove security4.fdb inválido/incompleto se existir
+         (estado 'Install incomplete' — zip portable não inicializa corretamente)
+      2. Tenta configurar SYSDBA via gsec -database (sem servidor)
+      3. Fallback: configura via isql TCP (sobe servidor temporário)
+    """
+    def log(m):
+        if log_fn: log_fn(m)
+
+    if _sysdba_configurado(versao) and _security_db_ok(versao):
+        log(f"  Security database FB{versao} OK (já configurado).")
+        return True
+
+    label = FB_CONFIGS[versao]["label"]
+    log(f"Inicializando security database do {label} ...")
+
+    ok = False
+
+    if versao == "3":
+        sec_path = _security_db_path("3")
+
+        # Remove o security3.fdb do zip portable se existir — ele tem tamanho
+        # normal (~1.6MB) mas está no estado 'Install incomplete'. O arquivo
+        # correto (~1.7MB) só vem do instalador oficial e tem >= 1.5MB.
+        # Sempre substitui para garantir que é o arquivo correto.
+        if os.path.isfile(sec_path):
+            tamanho = os.path.getsize(sec_path)
+            if tamanho < 1_500_000:
+                log(f"  [FB3] security3.fdb com tamanho suspeito ({tamanho:,} bytes) — removendo ...")
+                try:
+                    os.remove(sec_path)
+                except Exception:
+                    pass
+            elif _security_db_incompleto("3"):
+                log("  [FB3] security3.fdb com 'Install incomplete' — substituindo pelo do instalador oficial ...")
+                try:
+                    os.remove(sec_path)
+                except Exception:
+                    pass
+
+        # Obtém o security3.fdb correto via instalador oficial
+        if not os.path.isfile(sec_path) or not _security_db_ok("3"):
+            _obter_security3_fdb_via_instalador(log_fn)
+
+        # Configura SYSDBA
+        if _security_db_ok("3"):
+            ok = _configurar_sysdba_fb3_via_gsec(log_fn)
+        else:
+            log("  [FB3] Não foi possível obter o security3.fdb.")
+
+    else:  # versao == "4"
+        # FB4: o security4.fdb do zip está sempre no estado 'Install incomplete'.
+        # A solução correta é recriar do zero via isql embedded (sem servidor).
+        # Conforme README.security_database.txt do próprio FB4.
+        log("  [FB4] Inicializando security4.fdb via isql embedded ...")
+        ok = _inicializar_security_fb4_via_isql_embedded(log_fn)
+
+        # Fallback: via isql TCP (sobe servidor temporário)
+        if not ok:
+            log("  [FB4] Fallback: configurando SYSDBA via isql TCP ...")
+            ok = _configurar_sysdba_fb4_via_isql(log_fn)
+
+    if ok:
+        _marcar_sysdba_ok(versao)
+        log(f"  Security database {label} configurado com sucesso.")
+        log(f"  Usuário: {_FB_USER}  |  Senha: {_FB_PASSWORD}")
+    else:
+        log(
+            f"  AVISO: não foi possível configurar o SYSDBA automaticamente.\n"
+            f"  Corrija manualmente:\n"
+            f"    cd C:\\FuturaFirebird\\FB{versao}\n"
+            f"    gsec.exe -database security{versao}.fdb "
+            f"-user SYSDBA -password masterkey -modify SYSDBA -pw {_FB_PASSWORD}"
+        )
+
+    return ok
 
 
 # =============================================================================
@@ -621,14 +1091,6 @@ def fb_servico_rodando(versao: str) -> bool:
 
 
 def registrar_fb_servico(versao: str, log_fn=None) -> dict:
-    """
-    Registra o Firebird portable como serviço Windows (start=auto).
-
-    Estratégia por versão:
-      FB3 → wrapper pywin32 (garante nome customizado)
-      FB4 → sc create direto com firebird.exe -s
-             (instsvc.exe ignorado: sempre cria 'FirebirdServerDefaultInstance')
-    """
     def log(m):
         if log_fn: log_fn(m)
 
@@ -680,39 +1142,71 @@ def registrar_fb_servico(versao: str, log_fn=None) -> dict:
         registrado = False
 
         if versao == "4":
-            # ── FB4: sc create direto ────────────────────────────────────────
-            # Não usa instsvc.exe: ele sempre cria 'FirebirdServerDefaultInstance'
-            # conflitando com o serviço do FB3.
-            log("  FB4: sc create com firebird.exe (nome controlado pelo Futura)")
-            fbexe    = _encontrar_exe(versao, ["firebird.exe"]) \
-                    or _encontrar_exe(versao, ["fbserver.exe"]) \
-                    or servidor
-            bin_path = f'"{fbexe}" -s'
-            r = subprocess.run(
-                [
-                    "sc", "create", nome,
-                    f"binPath={bin_path}",
-                    f"DisplayName=Futura {label_v}",
-                    "start=auto",
-                    "type=own",
-                ],
-                capture_output=True, text=True,
-                encoding="utf-8", errors="ignore", timeout=15,
-            )
-            saida = (r.stdout + r.stderr).strip()
-            if saida:
-                log(f"  sc create: {saida[:300]}")
-            if r.returncode == 0 and _servico_existe(nome):
-                registrado = True
-                log(f"  Registrado via sc create (FB4) com nome '{nome}'.")
+            # FB4: usa instsvc.exe nativo que configura corretamente o serviço
+            instsvc4 = _encontrar_instsvc("4")
+            if instsvc4:
+                log(f"  FB4: registrando via instsvc.exe nativo ...")
+                r = subprocess.run(
+                    [instsvc4, "install", "-auto", "-n", nome],
+                    capture_output=True, text=True,
+                    encoding="utf-8", errors="ignore",
+                    timeout=30, cwd=cfg["dir"],
+                )
+                saida = (r.stdout + r.stderr).strip()
+                if saida:
+                    log(f"    instsvc: {saida[:300]}")
+                if _servico_existe(nome):
+                    registrado = True
+                    log(f"  Registrado via instsvc.exe (FB4) com nome '{nome}'.")
+                else:
+                    # Fallback: sc create
+                    log("  Fallback FB4: sc create ...")
+                    fbexe    = _encontrar_exe(versao, ["firebird.exe"]) or servidor
+                    bin_path = f'"{fbexe}" -s'
+                    r2 = subprocess.run(
+                        ["sc", "create", nome,
+                         f"binPath={bin_path}",
+                         f"DisplayName=Futura {label_v}",
+                         "start=auto", "type=own"],
+                        capture_output=True, text=True,
+                        encoding="utf-8", errors="ignore", timeout=15,
+                    )
+                    saida2 = (r2.stdout + r2.stderr).strip()
+                    if saida2:
+                        log(f"  sc create: {saida2[:300]}")
+                    if r2.returncode == 0 and _servico_existe(nome):
+                        registrado = True
+                        log(f"  Registrado via sc create (FB4).")
+                    else:
+                        return {"ok": False, "erro": (
+                            f"Nao foi possivel registrar o servico FB4. "
+                            f"instsvc rc={r.returncode}, sc create rc={r2.returncode}"
+                        )}
             else:
-                return {"ok": False, "erro": (
-                    f"Nao foi possivel registrar o servico FB4. "
-                    f"sc create rc={r.returncode}: {saida}"
-                )}
+                # Sem instsvc, usa sc create direto
+                fbexe    = _encontrar_exe(versao, ["firebird.exe"]) or servidor
+                bin_path = f'"{fbexe}" -s'
+                r = subprocess.run(
+                    ["sc", "create", nome,
+                     f"binPath={bin_path}",
+                     f"DisplayName=Futura {label_v}",
+                     "start=auto", "type=own"],
+                    capture_output=True, text=True,
+                    encoding="utf-8", errors="ignore", timeout=15,
+                )
+                saida = (r.stdout + r.stderr).strip()
+                if saida:
+                    log(f"  sc create: {saida[:300]}")
+                if r.returncode == 0 and _servico_existe(nome):
+                    registrado = True
+                    log(f"  Registrado via sc create (FB4).")
+                else:
+                    return {"ok": False, "erro": (
+                        f"Nao foi possivel registrar o servico FB4. "
+                        f"sc create rc={r.returncode}: {saida}"
+                    )}
 
         else:
-            # ── FB3: wrapper pywin32 ─────────────────────────────────────────
             log("  FB3: wrapper pywin32")
             res = _registrar_fb3_via_wrapper(nome, label_v, servidor, log_fn)
             if res["ok"]:
@@ -758,7 +1252,6 @@ def registrar_fb_servico(versao: str, log_fn=None) -> dict:
 
 
 def _registrar_fb3_via_wrapper(nome: str, label_v: str, servidor: str, log_fn=None) -> dict:
-    """Registra FB3 como serviço Windows usando wrapper pywin32."""
     def log(m):
         if log_fn: log_fn(m)
 
@@ -799,8 +1292,7 @@ def _registrar_fb3_via_wrapper(nome: str, label_v: str, servidor: str, log_fn=No
             "sc", "create", nome,
             f"binPath={bin_path}",
             f"DisplayName=Futura {label_v}",
-            "start=auto",
-            "type=own",
+            "start=auto", "type=own",
         ],
         capture_output=True, text=True,
         encoding="utf-8", errors="ignore", timeout=15,
@@ -894,10 +1386,6 @@ def remover_fb_servico(versao: str, log_fn=None) -> dict:
 
 
 def ativar_fb_servico(versao: str, log_fn=None) -> dict:
-    """
-    Inicia o serviço Windows Futura.
-    Garante que o security database está inicializado antes de subir.
-    """
     def log(m):
         if log_fn: log_fn(m)
     if not is_admin():
@@ -905,10 +1393,8 @@ def ativar_fb_servico(versao: str, log_fn=None) -> dict:
         log(f"ERRO: {msg}")
         return {"ok": False, "erro": msg, "requer_admin": True}
 
-    # ── Garante security database inicializado ────────────────────────────
     log(f"Verificando security database do FB{versao} ...")
     inicializar_security_db(versao, log_fn)
-    # ─────────────────────────────────────────────────────────────────────
 
     nome = FB_CONFIGS[versao]["servico_nome"]
 
@@ -919,7 +1405,7 @@ def ativar_fb_servico(versao: str, log_fn=None) -> dict:
             return r
         nome = FB_CONFIGS[versao]["servico_nome"]
     elif not _servico_binpath_valido(versao):
-        log(f"Servico '{nome}' com binPath incompativel ou apontando para versao errada. Recriando ...")
+        log(f"Servico '{nome}' com binPath incompativel. Recriando ...")
         r = registrar_fb_servico(versao, log_fn)
         if not r["ok"]:
             return r
@@ -1044,10 +1530,6 @@ def fb_habilitado(versao: str) -> bool:
 # =============================================================================
 
 def _outra_versao_rodando(versao: str) -> bool:
-    """
-    Retorna True se a versão oposta estiver ativa por qualquer meio:
-    processo portable, serviço Futura ou serviço oficial do FB3.
-    """
     outra = "4" if versao == "3" else "3"
     if _processo_rodando(outra):
         return True
@@ -1064,18 +1546,13 @@ def ativar_fb(versao: str, log_fn=None) -> dict:
     def log(m):
         if log_fn: log_fn(m)
 
-    # ── Bloqueio: impede ativar se a outra versão já estiver rodando ──────
     if _outra_versao_rodando(versao):
         outra     = "4" if versao == "3" else "3"
         outra_lbl = FB_CONFIGS[outra]["label"]
         esta_lbl  = FB_CONFIGS[versao]["label"]
-        msg = (
-            f"{outra_lbl} está ativo. "
-            f"Inative-o antes de ativar o {esta_lbl}."
-        )
+        msg = f"{outra_lbl} está ativo. Inative-o antes de ativar o {esta_lbl}."
         log(f"BLOQUEADO: {msg}")
         return {"ok": False, "erro": msg}
-    # ─────────────────────────────────────────────────────────────────────
 
     modo = fb_obter_modo(versao)
     if modo == "servico":
@@ -1095,10 +1572,8 @@ def ativar_fb(versao: str, log_fn=None) -> dict:
         log(f"ERRO: {msg}")
         return {"ok": False, "erro": msg}
 
-    # ── Garante security database inicializado (modo processo também) ─────
     log(f"Verificando security database do FB{versao} ...")
     inicializar_security_db(versao, log_fn)
-    # ─────────────────────────────────────────────────────────────────────
 
     _salvar_flag(versao, True)
     log(f"Firebird {versao} Portable habilitado (modo processo).")
@@ -1151,7 +1626,6 @@ def inativar_fb(versao: str, log_fn=None) -> dict:
         log(f"Modo servico Windows detectado para FB{versao}.")
         inativar_fb_servico(versao, log_fn)
 
-    # ── Para FB3: para o serviço oficial (instalação nativa) se ativo ────
     if versao == "3":
         nome_oficial = _nome_servico_oficial_fb3()
         if nome_oficial and _servico_rodando(nome_oficial):
@@ -1161,7 +1635,6 @@ def inativar_fb(versao: str, log_fn=None) -> dict:
                 log(f"Servico oficial '{nome_oficial}' parado com sucesso.")
             else:
                 log(f"AVISO: nao foi possivel parar o servico oficial '{nome_oficial}'.")
-    # ─────────────────────────────────────────────────────────────────────
 
     if _processo_rodando(versao):
         log(f"Parando processo Firebird {versao} Portable ...")
@@ -1348,11 +1821,26 @@ def instalar_fb_portable(
         log(f"firebird.conf configurado (porta {porta}).")
         prog(88)
 
-        # ── Inicializa o security database após extração ──────────────────
-        log(f"Inicializando security database ...")
+        # FB3: remove o security3.fdb que veio no zip (estado 'Install incomplete')
+        # e limpa a flag antiga para forcar reconfiguração completa.
+        if versao == "3":
+            sec_path_zip = os.path.join(fb_dir, "security3.fdb")
+            if os.path.isfile(sec_path_zip):
+                log("  [FB3] Removendo security3.fdb do zip (Install incomplete) ...")
+                try:
+                    os.remove(sec_path_zip)
+                except Exception as e:
+                    log(f"    falha ao remover: {e}")
+            flag = os.path.join(fb_dir, ".fb3_sysdba_ok")
+            if os.path.isfile(flag):
+                try:
+                    os.remove(flag)
+                except Exception:
+                    pass
+
+        log("Configurando security database e usuario SYSDBA ...")
         inicializar_security_db(versao, log_fn)
-        prog(95)
-        # ─────────────────────────────────────────────────────────────────
+        prog(96)
 
         gfix = _encontrar_gfix(versao)
         if not gfix:
@@ -1400,12 +1888,25 @@ def _configurar_firebird_conf(fb_dir, porta, versao):
         pasta = os.path.join(fb_dir, subdir) if subdir else fb_dir
         if os.path.isdir(pasta):
             conf_path = os.path.join(pasta, "firebird.conf")
-            with open(conf_path, "w", encoding="utf-8") as f:
-                f.write(
+            sec_db    = os.path.join(fb_dir, f"security{versao}.fdb")
+            if versao == "4":
+                # FB4: IpcName unico evita conflito de mutex XNET com FB3
+                conteudo = (
+                    f"# Firebird {versao} Portable — configurado pelo Futura Setup\n"
+                    f"RemoteServicePort = {porta}\n"
+                    "GuardianOption = 0\n"
+                    f"SecurityDatabase = {sec_db}\n"
+                    "IpcName = FB_FB4_IPC\n"
+                    "ServerMode = Super\n"
+                )
+            else:
+                conteudo = (
                     f"# Firebird {versao} Portable — configurado pelo Futura Setup\n"
                     f"RemoteServicePort = {porta}\n"
                     "GuardianOption = 0\n"
                 )
+            with open(conf_path, "w", encoding="utf-8") as f:
+                f.write(conteudo)
 
 
 def remover_fb_portable(versao: str = "4", log_fn=None) -> dict:
@@ -1435,6 +1936,117 @@ def remover_fb_portable(versao: str = "4", log_fn=None) -> dict:
 
 def remover_fb3_portable(log_fn=None) -> dict: return remover_fb_portable("3", log_fn)
 def remover_fb4_portable(log_fn=None) -> dict: return remover_fb_portable("4", log_fn)
+
+
+# =============================================================================
+# Configuração oficial FB4 — arquivos do repositório Futura
+# =============================================================================
+
+_FB4_REPO_ARQUIVOS = {
+    "firebird.conf": (
+        "https://repositorio.futurasistemas.com.br/download.php"
+        "?dirfisico=D:/Backup//repositorio//30%20-%20Firebird%204.0/Conf/firebird.conf"
+        "&caminho=https://repositorio.futurasistemas.com.br/repositorio/30%20-%20Firebird%204.0/Conf/firebird.conf"
+        "&filename=firebird.conf"
+    ),
+    "databases.conf": (
+        "https://repositorio.futurasistemas.com.br/download.php"
+        "?dirfisico=D:/Backup//repositorio//30%20-%20Firebird%204.0/Conf/databases.conf"
+        "&caminho=https://repositorio.futurasistemas.com.br/repositorio/30%20-%20Firebird%204.0/Conf/databases.conf"
+        "&filename=databases.conf"
+    ),
+    "Usuarios.sql": (
+        "https://repositorio.futurasistemas.com.br/download.php"
+        "?dirfisico=D:/Backup//repositorio//30%20-%20Firebird%204.0/Conf/Usuarios.sql"
+        "&caminho=https://repositorio.futurasistemas.com.br/repositorio/30%20-%20Firebird%204.0/Conf/Usuarios.sql"
+        "&filename=Usuarios.sql"
+    ),
+}
+
+
+def aplicar_configs_oficiais_fb4(
+    caminho_dados: str = "",
+    caminho_cep: str = "",
+    log_fn=None,
+) -> dict:
+    """
+    Baixa os 3 arquivos oficiais de configuração do FB4 do repositório Futura,
+    copia na raiz do FB4 e reinicia o serviço.
+
+    - firebird.conf : configurações do servidor (porta 3050 padrão oficial)
+    - databases.conf: aliases de bancos (Dados e CEP adicionados ao final)
+    - Usuarios.sql  : script de usuários (copiado apenas)
+
+    caminho_dados e caminho_cep são opcionais — se não informados, usa os
+    aliases já existentes no databases.conf baixado.
+    """
+    def log(m):
+        if log_fn: log_fn(m)
+
+    fb_dir   = FB_CONFIGS["4"]["dir"]
+    svc_nome = FB_CONFIGS["4"]["servico_nome"]
+    result   = {"ok": False, "erro": ""}
+
+    if not os.path.isdir(fb_dir):
+        result["erro"] = f"FB4 não está instalado em {fb_dir}."
+        log(f"ERRO: {result['erro']}")
+        return result
+
+    # ── Baixa os arquivos ────────────────────────────────────────────────
+    log("Baixando arquivos de configuração oficiais do FB4 ...")
+    for nome, url in _FB4_REPO_ARQUIVOS.items():
+        destino = os.path.join(fb_dir, nome)
+        log(f"  Baixando {nome} ...")
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "FuturaSetup/4.3"})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                with open(destino, "wb") as f:
+                    shutil.copyfileobj(resp, f)
+            log(f"  {nome} copiado ({os.path.getsize(destino):,} bytes).")
+        except Exception as e:
+            result["erro"] = f"Erro ao baixar {nome}: {e}"
+            log(f"  ERRO: {result['erro']}")
+            return result
+
+    # ── Porta 3050 já é o padrão oficial — nenhuma correção necessária ──────────
+    conf_path = os.path.join(fb_dir, "firebird.conf")
+    try:
+        with open(conf_path, "r", encoding="utf-8", errors="ignore") as f:
+            conf = f.read()
+        with open(conf_path, "w", encoding="utf-8") as f:
+            f.write(conf)
+        log("  firebird.conf: porta mantida como 3050 (padrão oficial).")
+    except Exception as e:
+        log(f"  AVISO: não foi possível ajustar porta no firebird.conf: {e}")
+
+    # ── Adiciona aliases Dados e CEP no databases.conf se informados ──────
+    if caminho_dados or caminho_cep:
+        try:
+            atualizar_databases_conf("4", caminho_dados, log_fn)
+        except Exception as e:
+            log(f"  AVISO: não foi possível atualizar databases.conf: {e}")
+
+    # ── Reinicia o serviço ────────────────────────────────────────────────
+    log("Reiniciando serviço FB4 ...")
+    try:
+        if _servico_rodando(svc_nome):
+            subprocess.run(["net", "stop", svc_nome], capture_output=True, timeout=30)
+            time.sleep(2)
+        if _servico_existe(svc_nome):
+            subprocess.run(["net", "start", svc_nome], capture_output=True, timeout=30)
+            time.sleep(3)
+            if _servico_rodando(svc_nome):
+                log("Serviço FB4 reiniciado com sucesso.")
+            else:
+                log("AVISO: serviço FB4 não subiu após reinício.")
+        else:
+            log("AVISO: serviço FB4 não está registrado — registre antes de aplicar configs.")
+    except Exception as e:
+        log(f"  AVISO: erro ao reiniciar serviço: {e}")
+
+    result["ok"] = True
+    log("Configuração oficial FB4 aplicada com sucesso.")
+    return result
 
 
 # =============================================================================
@@ -1476,3 +2088,167 @@ def gfix_fb(path, versao="4", user="SYSDBA", password="sbofutura") -> dict:
 
 def gfix_fb3(path, user="SYSDBA", password="sbofutura") -> dict: return gfix_fb(path, "3", user, password)
 def gfix_fb4(path, user="SYSDBA", password="sbofutura") -> dict: return gfix_fb(path, "4", user, password)
+
+
+# =============================================================================
+# databases.conf — varredura e atualização
+# =============================================================================
+
+# Arquivos a ignorar na varredura
+_FDB_IGNORAR_PREFIXOS = ["security"]
+_FDB_IGNORAR_SUFIXOS  = ["-journal", ".tmp"]
+_FDB_IGNORAR_NOMES    = ["security3.fdb", "security4.fdb"]
+
+
+def _fdb_ignorar(caminho: str) -> bool:
+    """Retorna True se o arquivo deve ser ignorado na varredura."""
+    nome = os.path.basename(caminho).lower()
+    for pref in _FDB_IGNORAR_PREFIXOS:
+        if nome.startswith(pref):
+            return True
+    for suf in _FDB_IGNORAR_SUFIXOS:
+        if nome.endswith(suf):
+            return True
+    if nome in _FDB_IGNORAR_NOMES:
+        return True
+    return False
+
+
+def varrer_fdb(
+    raiz: str = "C:\\",
+    log_fn=None,
+    progresso_fn=None,
+) -> list[str]:
+    """
+    Varre o HD a partir de 'raiz' e retorna lista de caminhos .fdb encontrados,
+    ignorando security*.fdb e arquivos temporários.
+
+    Retorna lista ordenada de caminhos absolutos.
+    """
+    def log(m):
+        if log_fn: log_fn(m)
+    def prog(p):
+        if progresso_fn: progresso_fn(p)
+
+    encontrados = []
+    pastas_ignorar = {
+        "windows", "program files", "program files (x86)",
+        "$recycle.bin", "system volume information",
+        "futurafirebird",  # ignora os próprios bancos do portable
+    }
+
+    log(f"Varrendo {raiz} em busca de arquivos .fdb ...")
+    prog(0)
+
+    try:
+        for raiz_dir, dirs, arquivos in os.walk(raiz, topdown=True):
+            # Remove pastas que não precisam ser varridas
+            dirs[:] = [
+                d for d in dirs
+                if d.lower() not in pastas_ignorar
+                and not d.startswith(".")
+            ]
+
+            for arq in arquivos:
+                if not arq.lower().endswith(".fdb"):
+                    continue
+                caminho = os.path.join(raiz_dir, arq)
+                if not _fdb_ignorar(caminho):
+                    encontrados.append(caminho)
+
+    except Exception as e:
+        log(f"  Erro durante varredura: {e}")
+
+    encontrados.sort()
+    log(f"Varredura concluída. {len(encontrados)} arquivo(s) .fdb encontrado(s).")
+    prog(100)
+    return encontrados
+
+
+def atualizar_databases_conf(
+    versao: str,
+    caminho_dados: str,
+    log_fn=None,
+) -> dict:
+    """
+    Atualiza (ou cria) o databases.conf do Firebird Portable com as entradas
+    Dados e Cep.
+
+    - caminho_dados : caminho completo do dados.fdb selecionado pelo usuário
+    - cep.fdb       : inferido automaticamente — mesma pasta, nome 'cep.fdb'
+
+    Formato gerado abaixo do marcador '# Live Databases:':
+
+        # Live Databases:
+        #
+        Dados = "C:\\caminho\\para\\dados.fdb"
+        Cep   = "C:\\caminho\\para\\cep.fdb"
+
+    Se o marcador não existir no arquivo, as entradas são adicionadas ao final.
+    Atualiza se já existir, cria se não existir.
+    """
+    def log(m):
+        if log_fn: log_fn(m)
+
+    fb_dir   = FB_CONFIGS[versao]["dir"]
+    conf_path = os.path.join(fb_dir, "databases.conf")
+
+    pasta_dados  = os.path.dirname(caminho_dados)
+    caminho_cep  = os.path.join(pasta_dados, "cep.fdb")
+
+    # Bloco Live Databases a inserir/substituir
+    bloco_live = (
+        "# Live Databases:\n"
+        "#\n"
+        f'Dados = {caminho_dados}\n'
+        f'Cep   = {caminho_cep}\n'
+    )
+
+    try:
+        # Lê conteúdo existente ou inicia vazio
+        if os.path.isfile(conf_path):
+            with open(conf_path, "r", encoding="utf-8") as f:
+                conteudo = f.read()
+            log(f"databases.conf existente encontrado: {conf_path}")
+        else:
+            conteudo = ""
+            log(f"databases.conf não encontrado — será criado: {conf_path}")
+
+        marcador = "# Live Databases:"
+
+        if marcador in conteudo:
+            # Substitui apenas o bloco Live Databases, preservando tudo antes
+            idx       = conteudo.index(marcador)
+            cabecalho = conteudo[:idx]
+            conteudo_final = cabecalho + bloco_live
+        else:
+            # Marcador não existe — preserva conteúdo original e adiciona ao final
+            # Remove entradas Dados/Cep antigas se existirem
+            linhas_limpas = []
+            for linha in conteudo.splitlines():
+                l = linha.strip().lower()
+                if l.startswith("dados =") or l.startswith("cep =") or l.startswith("cep   ="):
+                    continue
+                linhas_limpas.append(linha)
+            conteudo_limpo = "\n".join(linhas_limpas)
+            sep = "\n" if conteudo_limpo and not conteudo_limpo.endswith("\n") else ""
+            conteudo_final = conteudo_limpo + sep + "\n" + bloco_live
+
+        with open(conf_path, "w", encoding="utf-8") as f:
+            f.write(conteudo_final)
+
+        log(f"databases.conf atualizado com sucesso.")
+        log(f"  Dados = {caminho_dados}")
+        log(f"  Cep   = {caminho_cep}")
+        return {"ok": True, "erro": "", "conf_path": conf_path}
+
+    except Exception as e:
+        log(f"Erro ao atualizar databases.conf: {e}")
+        return {"ok": False, "erro": str(e), "conf_path": conf_path}
+
+
+def configurar_databases_fb3(caminho_dados: str, log_fn=None) -> dict:
+    return atualizar_databases_conf("3", caminho_dados, log_fn)
+
+def configurar_databases_fb4(caminho_dados: str, log_fn=None) -> dict:
+    return atualizar_databases_conf("4", caminho_dados, log_fn)
