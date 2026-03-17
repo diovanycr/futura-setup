@@ -18,14 +18,16 @@ from PyQt6.QtWidgets import (
     QButtonGroup, QRadioButton, QAbstractButton,
     QPlainTextEdit, QPushButton, QListWidget,
     QListWidgetItem, QAbstractItemView, QFileDialog, QTabWidget,
+    QGridLayout,
 )
 
 from ui.theme         import COLORS, FONT_SANS, FONT_MONO
 from ui.theme_manager import theme_manager
 from ui.widgets       import (
-    PageTitle, SectionHeader, AlertBox,
+    PageTitle, SectionHeader, AlertBox, LogConsole,
     make_primary_btn, make_secondary_btn,
     btn_row, spacer, h_line, label,
+    _apply_primary_style, _apply_secondary_style,
 )
 from core.fb_portable import (
     FB_CONFIGS,
@@ -42,9 +44,11 @@ from core.fb_portable import (
     fb_servico_rodando,
     registrar_fb_servico,
     remover_fb_servico,
+    ativar_fb_servico,
     varrer_fdb,
     atualizar_databases_conf,
     aplicar_configs_oficiais_fb4,
+    reiniciar_fb,
 )
 
 # Cores por versão
@@ -205,6 +209,57 @@ class _DatabasesConfWorker(QThread):
         r = atualizar_databases_conf(self.versao, self.caminho_dados, self.log.emit)
         self.concluido.emit(r)
 
+class _AutoInstallWorker(QThread):
+    log       = pyqtSignal(str)
+    progresso = pyqtSignal(int)
+    concluido = pyqtSignal(dict)
+
+    def __init__(self, versao: str, parent=None):
+        super().__init__(parent)
+        self.versao = versao
+
+    def run(self):
+        # Passo 1: Instalação (Download + Extração) - Igual à aba Instalar/Remover
+        self.log.emit(f"--- PASSO 1: Instalando Firebird {self.versao} Portable ---")
+        r_inst = instalar_fb_portable(self.versao, self.log.emit, self.progresso.emit)
+        if not r_inst["ok"]:
+            self.concluido.emit(r_inst)
+            return
+
+        # Passo 2: Registrar como Serviço e Iniciar
+        self.log.emit(f"\n--- PASSO 2: Registrando Serviço Windows (FB{self.versao}) ---")
+        r_svc = registrar_fb_servico(self.versao, self.log.emit)
+        if not r_svc["ok"]:
+            self.concluido.emit(r_svc)
+            return
+
+        # Ativa o serviço recém cadastrado
+        self.log.emit(f"Iniciando servico FB{self.versao}...")
+        r_ativ = ativar_fb_servico(self.versao, self.log.emit)
+
+        # Passo Extra para FB4: Baixar os 3 arquivos oficiais
+        if self.versao == "4":
+            self.log.emit(f"\n--- PASSO 3: Baixando arquivos oficiais (FB4) ---")
+            r_fb4 = aplicar_configs_oficiais_fb4(log_fn=self.log.emit)
+            if not r_fb4["ok"]:
+                self.log.emit(f"AVISO: Nao foi possivel baixar configs oficiais: {r_fb4['erro']}")
+        
+        # Consolida resultado
+        res = r_inst.copy()
+        res.update({"servico_ok": r_svc["ok"], "ativado_ok": r_ativ["ok"]})
+        self.concluido.emit(res)
+
+
+class _ReiniciarWorker(QThread):
+    log       = pyqtSignal(str)
+    concluido = pyqtSignal(dict)
+
+    def __init__(self, versao: str, parent=None):
+        super().__init__(parent)
+        self.versao = versao
+
+    def run(self):
+        self.concluido.emit(reiniciar_fb(self.versao, self.log.emit))
 
 # =============================================================================
 # Card de modo de execução
@@ -224,38 +279,35 @@ class _ModoCard(QFrame):
 
     def _build_ui(self):
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(14, 12, 14, 12)
-        lay.setSpacing(8)
+        lay.setContentsMargins(14, 10, 14, 10)
+        lay.setSpacing(6)
 
+        # Header: Titulo + Badge
+        header = QHBoxLayout()
         titulo = QLabel("Modo de execução")
         titulo.setFont(QFont(FONT_SANS, 10, QFont.Weight.Bold))
-        titulo.setStyleSheet(
-            f"color:{COLORS.get('text')}; background:transparent; border:none;"
-        )
-        lay.addWidget(titulo)
+        titulo.setStyleSheet("color:{COLORS.get('text')}; background:transparent; border:none;")
+        
+        self._badge = QLabel()
+        self._badge.setFont(QFont(FONT_SANS, 8, QFont.Weight.Bold))
+        self._badge.setFixedWidth(72)
+        self._badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        header.addWidget(titulo, 1)
+        header.addWidget(self._badge)
+        lay.addLayout(header)
 
+        # Status row
         row = QHBoxLayout()
         row.setSpacing(8)
         self._dot = QWidget()
         self._dot.setFixedSize(8, 8)
         self._lbl_modo = QLabel()
         self._lbl_modo.setFont(QFont(FONT_MONO, 9))
-        self._lbl_modo.setStyleSheet(
-            f"color:{COLORS.get('text_mid','#aaa')}; background:transparent; border:none;"
-        )
-        self._badge = QLabel()
-        self._badge.setFont(QFont(FONT_SANS, 8, QFont.Weight.Bold))
-        self._badge.setFixedWidth(72)
-        self._badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._lbl_modo.setStyleSheet(f"color:{COLORS.get('text_mid','#aaa')}; background:transparent; border:none;")
         row.addWidget(self._dot)
         row.addWidget(self._lbl_modo, 1)
-        row.addWidget(self._badge)
         lay.addLayout(row)
-
-        div = QFrame()
-        div.setFrameShape(QFrame.Shape.HLine)
-        div.setStyleSheet(f"color:{COLORS.get('border','#444')};")
-        lay.addWidget(div)
 
         self._lbl_desc = QLabel()
         self._lbl_desc.setFont(QFont(FONT_SANS, 9))
@@ -266,21 +318,19 @@ class _ModoCard(QFrame):
         lay.addWidget(self._lbl_desc)
 
         btn_lay = QHBoxLayout()
+        self._lbl_nota = QLabel("[!] Requer adm")
+        self._lbl_nota.setFont(QFont(FONT_SANS, 8))
+        self._lbl_nota.setStyleSheet("color:#e67e22; background:transparent; border:none;")
+        btn_lay.addWidget(self._lbl_nota)
         btn_lay.addStretch()
+
         self._btn_acao = QPushButton()
-        self._btn_acao.setFixedHeight(30)
+        self._btn_acao.setFixedHeight(28)
         self._btn_acao.setFont(QFont(FONT_SANS, 9))
         self._btn_acao.setCursor(Qt.CursorShape.PointingHandCursor)
         self._btn_acao.clicked.connect(self._on_btn)
         btn_lay.addWidget(self._btn_acao)
         lay.addLayout(btn_lay)
-
-        self._lbl_nota = QLabel("[!] Requer privilegios de administrador")
-        self._lbl_nota.setFont(QFont(FONT_SANS, 8))
-        self._lbl_nota.setStyleSheet(
-            "color:#e67e22; background:transparent; border:none;"
-        )
-        lay.addWidget(self._lbl_nota)
 
     def atualizar(self, instalado: bool, modo: str, svc_registrado: bool, svc_rodando: bool):
         self._svc_registrado = svc_registrado
@@ -449,7 +499,7 @@ class _ToggleRow(QWidget):
                 background:{COLORS.get('surface','#1e1e1e')};
                 border:1px solid {COLORS.get('border','#444')};
                 border-radius:10px;
-                padding: 10px;
+                padding: 6px 12px;
             }}
             _ToggleRow:hover {{
                 border:1px solid {_COR[self._versao]};
@@ -640,42 +690,30 @@ class _BannerAdmin(QFrame):
         super().__init__(parent)
         self.setObjectName("banner_admin")
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(14, 10, 14, 10)
-        lay.setSpacing(12)
+        lay.setContentsMargins(12, 6, 12, 6)
+        lay.setSpacing(10)
 
         ico = QLabel("[!]")
-        ico.setFont(QFont(FONT_SANS, 14))
+        ico.setFont(QFont(FONT_SANS, 12, QFont.Weight.Bold))
         ico.setStyleSheet("color:#e67e22; background:transparent; border:none;")
-        ico.setFixedWidth(24)
+        ico.setFixedWidth(20)
 
-        col = QVBoxLayout()
-        col.setSpacing(2)
-        t = QLabel("Permissão de administrador necessária")
-        t.setFont(QFont(FONT_SANS, 10, QFont.Weight.Bold))
-        t.setStyleSheet("color:#e67e22; background:transparent; border:none;")
-        s = QLabel(
-            "Gerenciar serviços Windows exige privilégios elevados. "
-            "Reinicie o Futura Setup como Administrador."
-        )
-        s.setFont(QFont(FONT_SANS, 9))
-        s.setWordWrap(True)
-        s.setStyleSheet(
-            f"color:{COLORS.get('text_mid','#aaa')}; background:transparent; border:none;"
-        )
-        col.addWidget(t); col.addWidget(s)
+        self.lbl_msg = QLabel("Permissão de administrador necessária para gerenciar serviços.")
+        self.lbl_msg.setFont(QFont(FONT_SANS, 9))
+        self.lbl_msg.setStyleSheet(f"color:{COLORS.get('text','#fff')}; background:transparent;")
+        
+        self.btn_reiniciar = make_primary_btn("Reiniciar como Admin", 150)
+        self.btn_reiniciar.setFixedHeight(26)
 
-        self.btn_reiniciar = make_primary_btn("Reiniciar como Admin", 160)
-        self.btn_reiniciar.setFixedHeight(30)
-
-        lay.addWidget(ico)
-        lay.addLayout(col, 1)
-        lay.addWidget(self.btn_reiniciar)
+        lay.addWidget(ico, 0, Qt.AlignmentFlag.AlignVCenter)
+        lay.addWidget(self.lbl_msg, 1, Qt.AlignmentFlag.AlignVCenter)
+        lay.addWidget(self.btn_reiniciar, 0, Qt.AlignmentFlag.AlignVCenter)
 
         self.setStyleSheet("""
             QFrame#banner_admin {
                 background:rgba(230,126,34,0.12);
-                border:1.5px solid #e67e22;
-                border-radius:8px;
+                border:1.2px solid #e67e22;
+                border-radius:6px;
             }
         """)
 
@@ -703,116 +741,90 @@ class _DatabasesConfCard(QFrame):
         lay.setContentsMargins(16, 14, 16, 14)
         lay.setSpacing(10)
 
-        # Cabeçalho
+        # Descrição compacta com tooltip
+        header_lay = QHBoxLayout()
         titulo = QLabel("Configurar databases.conf")
         titulo.setFont(QFont(FONT_SANS, 11, QFont.Weight.Bold))
-        titulo.setStyleSheet(
-            f"color:{COLORS.get('text','#fff')}; background:transparent; border:none;"
-        )
-        lay.addWidget(titulo)
-
-        desc = QLabel(
+        titulo.setStyleSheet(f"color:{COLORS.get('text','#fff')};")
+        
+        info_btn = QLabel("ⓘ")
+        info_btn.setToolTip(
             "Varre o HD em busca de arquivos .fdb, selecione o arquivo Dados "
-            "e clique em Aplicar. O cep.fdb será configurado automaticamente "
-            "a partir da mesma pasta."
+            "e clique em Aplicar. O cep.fdb será configurado automaticamente."
         )
-        desc.setFont(QFont(FONT_SANS, 9))
-        desc.setWordWrap(True)
-        desc.setStyleSheet(
-            f"color:{COLORS.get('text_dim','#888')}; background:transparent; border:none;"
-        )
-        lay.addWidget(desc)
+        info_btn.setStyleSheet(f"color:{COLORS.get('accent','#0078d4')}; font-weight:bold;")
+        
+        header_lay.addWidget(titulo)
+        header_lay.addWidget(info_btn)
+        header_lay.addStretch()
+        lay.addLayout(header_lay)
 
-        # Seleção de versão
-        ver_row = QHBoxLayout()
-        ver_row.setSpacing(8)
-        lbl_ver = QLabel("Versão:")
-        lbl_ver.setFont(QFont(FONT_SANS, 9))
-        lbl_ver.setStyleSheet(
-            f"color:{COLORS.get('text_mid','#aaa')}; background:transparent; border:none;"
-        )
-        self._radio_fb3 = QRadioButton("FB3 (porta 3050)")
-        self._radio_fb4 = QRadioButton("FB4 (porta 3051)")
-        self._radio_fb3.setFont(QFont(FONT_SANS, 9))
-        self._radio_fb4.setFont(QFont(FONT_SANS, 9))
-        self._radio_fb3.setStyleSheet(
-            f"color:{COLORS.get('text','#fff')}; background:transparent;"
-        )
-        self._radio_fb4.setStyleSheet(
-            f"color:{COLORS.get('text','#fff')}; background:transparent;"
-        )
+        # Controles em linha única (Versão + Ações)
+        ctrl_row = QHBoxLayout()
+        ctrl_row.setSpacing(8)
+        
+        lbl_v = QLabel("FB:")
+        lbl_v.setFont(QFont(FONT_SANS, 9, QFont.Weight.Bold))
+        self._radio_fb3 = QRadioButton("3")
+        self._radio_fb4 = QRadioButton("4")
         self._radio_fb4.setChecked(True)
-        ver_row.addWidget(lbl_ver)
-        ver_row.addWidget(self._radio_fb3)
-        ver_row.addWidget(self._radio_fb4)
-        ver_row.addStretch()
-        lay.addLayout(ver_row)
-
-        # Botões varrer / selecionar via Explorer
-        btns_row = QHBoxLayout()
-        btns_row.setSpacing(8)
-        self._btn_varrer = make_primary_btn("Varrer HD", 140)
+        
+        self._btn_varrer = make_primary_btn("Varrer HD", 100)
+        self._btn_varrer.setFixedHeight(26)
         self._btn_varrer.clicked.connect(self._on_varrer)
-        self._btn_explorer = make_secondary_btn("Selecionar arquivo", 180)
-        self._btn_explorer.clicked.connect(self._on_selecionar_explorer)
-        btns_row.addWidget(self._btn_varrer)
-        btns_row.addWidget(self._btn_explorer)
-        btns_row.addStretch()
-        lay.addLayout(btns_row)
 
-        # Label contador
+        self._btn_explorer = make_secondary_btn("Procurar", 100)
+        self._btn_explorer.setFixedHeight(26)
+        self._btn_explorer.clicked.connect(self._on_selecionar_explorer)
+        
+        ctrl_row.addWidget(lbl_v)
+        ctrl_row.addWidget(self._radio_fb3)
+        ctrl_row.addWidget(self._radio_fb4)
+        ctrl_row.addSpacing(4)
+        ctrl_row.addWidget(self._btn_varrer)
+        ctrl_row.addWidget(self._btn_explorer)
+        ctrl_row.addStretch()
+        lay.addLayout(ctrl_row)
+
+        # Label contador (Menor, agora acima da lista)
         self._lbl_count = QLabel("")
-        self._lbl_count.setFont(QFont(FONT_MONO, 9))
-        self._lbl_count.setStyleSheet(
-            f"color:{COLORS.get('text_dim','#888')}; background:transparent; border:none;"
-        )
+        self._lbl_count.setFont(QFont(FONT_MONO, 8, QFont.Weight.Bold))
+        self._lbl_count.setStyleSheet(f"color:{COLORS.get('text_dim','#888')}; margin-top: 4px;")
         lay.addWidget(self._lbl_count)
 
-        # Lista de arquivos
+        # Lista de arquivos (Aumentada para aproveitar espaço)
         self._lista = QListWidget()
-        self._lista.setFixedHeight(180)
-        self._lista.setFont(QFont(FONT_MONO, 9))
+        self._lista.setMinimumHeight(180)
+        self._lista.setMaximumHeight(250)
+        self._lista.setFont(QFont(FONT_MONO, 8))
         self._lista.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self._lista.itemSelectionChanged.connect(self._on_selecao_changed)
         self._lista.setStyleSheet(self._lista_style())
         lay.addWidget(self._lista)
 
-        # Preview do caminho selecionado
-        prev_row = QHBoxLayout()
-        prev_row.setSpacing(8)
-        lbl_prev = QLabel("Dados:")
-        lbl_prev.setFont(QFont(FONT_SANS, 9, QFont.Weight.Bold))
-        lbl_prev.setFixedWidth(50)
-        lbl_prev.setStyleSheet(
-            f"color:{COLORS.get('text_mid','#aaa')}; background:transparent; border:none;"
-        )
+        # Previews Dados e Cep (Mais espaçado)
+        lay.addSpacing(12) 
+        prev_glay = QGridLayout()
+        prev_glay.setVerticalSpacing(8)
+        prev_glay.setHorizontalSpacing(15)
+        
+        lbl_d = QLabel("Dados:")
+        lbl_d.setFont(QFont(FONT_SANS, 8, QFont.Weight.Bold))
         self._lbl_dados = QLabel("—")
-        self._lbl_dados.setFont(QFont(FONT_MONO, 9))
-        self._lbl_dados.setWordWrap(True)
-        self._lbl_dados.setStyleSheet(
-            f"color:{COLORS.get('accent','#0078d4')}; background:transparent; border:none;"
-        )
-        prev_row.addWidget(lbl_prev)
-        prev_row.addWidget(self._lbl_dados, 1)
-        lay.addLayout(prev_row)
-
-        cep_row = QHBoxLayout()
-        cep_row.setSpacing(8)
-        lbl_cep = QLabel("Cep:")
-        lbl_cep.setFont(QFont(FONT_SANS, 9, QFont.Weight.Bold))
-        lbl_cep.setFixedWidth(50)
-        lbl_cep.setStyleSheet(
-            f"color:{COLORS.get('text_mid','#aaa')}; background:transparent; border:none;"
-        )
+        self._lbl_dados.setFont(QFont(FONT_MONO, 8))
+        self._lbl_dados.setStyleSheet(f"color:{COLORS.get('accent','#0078d4')};")
+        
+        lbl_c = QLabel("Cep:")
+        lbl_c.setFont(QFont(FONT_SANS, 8, QFont.Weight.Bold))
         self._lbl_cep = QLabel("—")
-        self._lbl_cep.setFont(QFont(FONT_MONO, 9))
-        self._lbl_cep.setWordWrap(True)
-        self._lbl_cep.setStyleSheet(
-            f"color:{COLORS.get('text_dim','#888')}; background:transparent; border:none;"
-        )
-        cep_row.addWidget(lbl_cep)
-        cep_row.addWidget(self._lbl_cep, 1)
-        lay.addLayout(cep_row)
+        self._lbl_cep.setFont(QFont(FONT_MONO, 8))
+        self._lbl_cep.setStyleSheet(f"color:{COLORS.get('text_dim','#888')};")
+        
+        prev_glay.addWidget(lbl_d, 0, 0)
+        prev_glay.addWidget(self._lbl_dados, 0, 1)
+        prev_glay.addWidget(lbl_c, 1, 0)
+        prev_glay.addWidget(self._lbl_cep, 1, 1)
+        lay.addLayout(prev_glay)
 
         # Botão aplicar
         self._btn_aplicar = make_primary_btn("Aplicar", 120)
@@ -832,38 +844,7 @@ class _DatabasesConfCard(QFrame):
         aplic_row.addWidget(self._lbl_resultado, 1)
         lay.addLayout(aplic_row)
 
-        # Separador
-        div2 = QFrame()
-        div2.setFrameShape(QFrame.Shape.HLine)
-        div2.setStyleSheet(f"color:{COLORS.get('border','#444')};")
-        lay.addWidget(div2)
-
-        # Botão configs oficiais FB4
-        self._btn_configs_oficiais = make_secondary_btn("Aplicar configs oficiais FB4", 240)
-        self._btn_configs_oficiais.setToolTip(
-            "Baixa firebird.conf, databases.conf e Usuarios.sql do repositório Futura "
-            "e reinicia o serviço FB4."
-        )
-        self._btn_configs_oficiais.clicked.connect(self._on_configs_oficiais)
-        lbl_conf = QLabel("Baixa os arquivos oficiais do repositório Futura e reinicia o serviço.")
-        lbl_conf.setFont(QFont(FONT_SANS, 8))
-        lbl_conf.setWordWrap(True)
-        lbl_conf.setStyleSheet(
-            f"color:{COLORS.get('text_dim','#888')}; background:transparent; border:none;"
-        )
-        conf_row = QHBoxLayout()
-        conf_row.setSpacing(12)
-        conf_row.addWidget(self._btn_configs_oficiais)
-        conf_row.addWidget(lbl_conf, 1)
-        lay.addLayout(conf_row)
-
-        self._lbl_conf_resultado = QLabel("")
-        self._lbl_conf_resultado.setFont(QFont(FONT_SANS, 9))
-        self._lbl_conf_resultado.setWordWrap(True)
-        self._lbl_conf_resultado.setStyleSheet(
-            "color:#2ecc71; background:transparent; border:none;"
-        )
-        lay.addWidget(self._lbl_conf_resultado)
+        lay.addStretch()
 
     # -- Varredura --------------------------------------------------------
 
@@ -994,43 +975,6 @@ class _DatabasesConfCard(QFrame):
         self._worker = worker
         worker.start()
 
-    def _on_configs_oficiais(self):
-        self._btn_configs_oficiais.setEnabled(False)
-        self._btn_varrer.setEnabled(False)
-        self._btn_explorer.setEnabled(False)
-        self._btn_aplicar.setEnabled(False)
-        self._lbl_conf_resultado.setText("Baixando e aplicando...")
-        self._lbl_conf_resultado.setStyleSheet(
-            f"color:{COLORS.get('text_mid','#aaa')}; background:transparent; border:none;"
-        )
-
-        # Pega caminho selecionado se houver
-        items = self._lista.selectedItems()
-        caminho_dados = items[0].text() if items else ""
-
-        worker = _ConfigsOficiaisWorker(caminho_dados=caminho_dados)
-        worker.log.connect(lambda m: self._lbl_conf_resultado.setText(m))
-        worker.concluido.connect(self._on_configs_oficiais_concluido)
-        worker.finished.connect(lambda: setattr(self, "_worker", None))
-        self._worker = worker
-        worker.start()
-
-    def _on_configs_oficiais_concluido(self, r: dict):
-        self._btn_configs_oficiais.setEnabled(True)
-        self._btn_varrer.setEnabled(True)
-        self._btn_explorer.setEnabled(True)
-        self._btn_aplicar.setEnabled(bool(self._lista.selectedItems()))
-        if r["ok"]:
-            self._lbl_conf_resultado.setText("Configs oficiais FB4 aplicadas com sucesso!")
-            self._lbl_conf_resultado.setStyleSheet(
-                "color:#2ecc71; background:transparent; border:none;"
-            )
-        else:
-            self._lbl_conf_resultado.setText(f"Erro: {r['erro']}")
-            self._lbl_conf_resultado.setStyleSheet(
-                "color:#e74c3c; background:transparent; border:none;"
-            )
-
     def _on_aplicar_concluido(self, r: dict):
         self._btn_aplicar.setEnabled(True)
         self._btn_varrer.setEnabled(True)
@@ -1091,14 +1035,224 @@ class _DatabasesConfCard(QFrame):
 
 
 # =============================================================================
+# Card de Instalação Automática
+# =============================================================================
+
+class _AutoInstallCard(QFrame):
+    acao_solicitada = pyqtSignal(str) # (versao)
+
+    def __init__(self, versao: str, parent=None):
+        super().__init__(parent)
+        self._versao = versao
+        self.setObjectName(f"auto_install_card_{versao}")
+        self._build_ui()
+        self._upd_style()
+        theme_manager.theme_changed.connect(lambda _: self._upd_style())
+
+    def _build_ui(self):
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(18, 18, 18, 18)
+        lay.setSpacing(12)
+
+        header = QHBoxLayout()
+        titulo = QLabel(f"Firebird {self._versao}")
+        titulo.setFont(QFont(FONT_SANS, 12, QFont.Weight.Bold))
+        titulo.setStyleSheet(f"color:{_COR[self._versao]};")
+        
+        icon = QLabel("🚀")
+        icon.setFont(QFont(FONT_SANS, 14))
+        
+        header.addWidget(titulo, 1)
+        
+        self._lbl_installed = label("✅ INSTALADO", COLORS["accent2"], 8)
+        self._lbl_installed.setStyleSheet(f"color:{COLORS['accent2']}; font-weight: bold;")
+        self._lbl_installed.setVisible(False)
+        header.addWidget(self._lbl_installed)
+
+        header.addWidget(icon)
+        lay.addLayout(header)
+
+        h_line_lay = QVBoxLayout()
+        h_line_lay.setContentsMargins(0, 4, 0, 8)
+        hl = QFrame()
+        hl.setFrameShape(QFrame.Shape.HLine)
+        hl.setStyleSheet(f"background:{COLORS.get('border','#444')}; max-height:1px;")
+        h_line_lay.addWidget(hl)
+        lay.addLayout(h_line_lay)
+
+        steps = [
+            "Download e instalação do portable",
+            "Configuração do modo de execução",
+            "Ativação automática da versão"
+        ]
+        if self._versao == "4":
+            steps.insert(2, "Importação de configurações oficiais")
+
+        desc_text = "Este assistente executará:\n"
+        for i, s in enumerate(steps, 1):
+            desc_text += f"   {i}. {s}\n"
+
+        desc = label(desc_text.strip(), COLORS["text_mid"], 9)
+        desc.setWordWrap(True)
+        desc.setStyleSheet(f"color:{COLORS["text_mid"]}; line-height: 1.4;")
+        lay.addWidget(desc)
+
+        lay.addStretch()
+
+        # ÁREA DE STATUS (Oculta por padrão)
+        self._status_box = QWidget()
+        self._status_box.setVisible(False)
+        st_lay = QVBoxLayout(self._status_box)
+        st_lay.setContentsMargins(0, 8, 0, 8)
+        st_lay.setSpacing(6)
+
+        self._lbl_status = label("Preparando...", COLORS["text_dim"], 8)
+        self._pbar = QProgressBar()
+        self._pbar.setFixedHeight(4)
+        self._pbar.setTextVisible(False)
+        self._pbar.setRange(0, 100)
+        
+        st_lay.addWidget(self._lbl_status)
+        st_lay.addWidget(self._pbar)
+        lay.addWidget(self._status_box)
+
+        self._btn = make_primary_btn("INSTALAÇÃO AUTOMÁTICA", 240)
+        self._btn.setFixedHeight(38)
+        self._btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn.clicked.connect(lambda: self.acao_solicitada.emit(self._versao))
+        lay.addWidget(self._btn, 0, Qt.AlignmentFlag.AlignCenter)
+
+    def set_loading(self, active: bool, msg: str = "", progress: int = 0):
+        self._status_box.setVisible(active)
+        self._btn.setEnabled(not active)
+        if active:
+            if msg: self._lbl_status.setText(msg)
+            self._pbar.setValue(progress)
+
+    def set_installed(self, installed: bool):
+        self._lbl_installed.setVisible(installed)
+        if installed:
+            self._btn.setText("REINSTALAR")
+            _apply_secondary_style(self._btn) # Muda visual para secundário se já existe
+        else:
+            self._btn.setText("INSTALAÇÃO AUTOMÁTICA")
+            _apply_primary_style(self._btn)
+
+    def _upd_style(self, _=""):
+        acc = _COR[self._versao]
+        bg  = COLORS.get('surface','#1e1e1e')
+        brd = COLORS.get('border','#444')
+        self.setStyleSheet(f"""
+            QFrame#auto_install_card_{self._versao} {{
+                background:{bg};
+                border:1.5px solid {brd};
+                border-radius:12px;
+            }}
+            QFrame#auto_install_card_{self._versao}:hover {{
+                border:1.5px solid {acc};
+                background:{COLORS.get('surface2','#2a2a2a')};
+            }}
+        """)
+        self._pbar.setStyleSheet(f"""
+            QProgressBar {{ background: {brd}; border: none; border-radius: 2px; }}
+            QProgressBar::chunk {{ background: {acc}; border-radius: 2px; }}
+        """)
+
+
+# =============================================================================
+
+
+# =============================================================================
+# Card de Configuração FB4 (Recuperação)
+# =============================================================================
+
+class _Fb4ConfigCard(QFrame):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("fb4_config_card")
+        self._worker: QThread | None = None
+        self._build_ui()
+        self._upd_style()
+        theme_manager.theme_changed.connect(lambda _: self._upd_style())
+
+    def _build_ui(self):
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(16, 16, 16, 16)
+        lay.setSpacing(12)
+
+        titulo = QLabel("Recuperar Configurações Oficiais FB4")
+        titulo.setFont(QFont(FONT_SANS, 11, QFont.Weight.Bold))
+        titulo.setStyleSheet(f"color:{COLORS.get('text','#fff')};")
+        lay.addWidget(titulo)
+
+        desc = QLabel(
+            "Esta ferramenta baixa e aplica as configurações recomendadas para o Firebird 4.\n"
+            "Arquivos afetados: firebird.conf, databases.conf, aliases e configurações de segurança.\n\n"
+            "Útil para restaurar o ambiente padrão da Futura ou corrigir erros de comunicação."
+        )
+        desc.setFont(QFont(FONT_SANS, 9))
+        desc.setWordWrap(True)
+        desc.setStyleSheet(f"color:{COLORS.get('text_mid','#aaa')};")
+        lay.addWidget(desc)
+
+        lay.addSpacing(8)
+
+        self._btn_recuperar = make_primary_btn("BAIXAR E APLICAR CONFIGURAÇÕES", 280)
+        self._btn_recuperar.setFixedHeight(36)
+        self._btn_recuperar.clicked.connect(self._on_recuperar)
+        lay.addWidget(self._btn_recuperar, 0, Qt.AlignmentFlag.AlignCenter)
+
+        self._lbl_resultado = QLabel("")
+        self._lbl_resultado.setFont(QFont(FONT_SANS, 10))
+        self._lbl_resultado.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._lbl_resultado.setWordWrap(True)
+        lay.addWidget(self._lbl_resultado)
+
+        lay.addStretch()
+
+    def _on_recuperar(self):
+        self._btn_recuperar.setEnabled(False)
+        self._lbl_resultado.setText("Baixando e configurando ambiente FB4...")
+        self._lbl_resultado.setStyleSheet(f"color:{COLORS.get('accent','#0078d4')};")
+
+        worker = _ConfigsOficiaisWorker()
+        worker.log.connect(lambda m: self._lbl_resultado.setText(m))
+        worker.concluido.connect(self._on_recuperar_concluido)
+        worker.finished.connect(lambda: setattr(self, "_worker", None))
+        self._worker = worker
+        worker.start()
+
+    def _on_recuperar_concluido(self, r: dict):
+        self._btn_recuperar.setEnabled(True)
+        if r["ok"]:
+            self._lbl_resultado.setText("Ambiente Firebird 4 configurado com sucesso!")
+            self._lbl_resultado.setStyleSheet("color:#2ecc71; font-weight:bold;")
+        else:
+            self._lbl_resultado.setText(f"Erro na recuperação: {r['erro']}")
+            self._lbl_resultado.setStyleSheet("color:#e74c3c; font-weight:bold;")
+
+    def _upd_style(self, _=""):
+        self.setStyleSheet(f"""
+            QFrame#fb4_config_card {{
+                background:{COLORS.get('surface','#1e1e1e')};
+                border:1.5px solid {COLORS.get('border','#444')};
+                border-radius:12px;
+            }}
+        """)
+
+
+# =============================================================================
 # Dashboard de Status Geral
 # =============================================================================
 
 class _StatusDashboard(QFrame):
+    versao_clicada = pyqtSignal(str)   # (versao)
+    acao_solicitada = pyqtSignal(str, str) # (versao, acao)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("status_dashboard")
-        self.setFixedHeight(90)
+        self.setFixedHeight(100)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(16, 8, 16, 8)
         lay.setSpacing(16)
@@ -1106,49 +1260,80 @@ class _StatusDashboard(QFrame):
         self._boxes = {}
         for v in ("3", "4"):
             box = QFrame()
-            box.setFixedWidth(240)
-            box.setStyleSheet(f"""
-                QFrame {{
-                    background:{COLORS.get('bg')};
-                    border:1px solid {COLORS.get('border')};
-                    border-radius:8px;
-                }}
-            """)
+            box.setFixedWidth(260)
+            box.setObjectName(f"dash_box_{v}")
+            box.setCursor(Qt.CursorShape.PointingHandCursor)
+            box.mousePressEvent = lambda e, versao=v: self.versao_clicada.emit(versao)
+
             bl = QVBoxLayout(box)
-            bl.setSpacing(2)
+            bl.setSpacing(6)
+            bl.setContentsMargins(12, 10, 12, 10)
             
+            # Linha Superior: Título e Status (Compacto)
+            top_row = QHBoxLayout()
             lbl_v = QLabel(f"Firebird {v}")
-            lbl_v.setFont(QFont(FONT_SANS, 9, QFont.Weight.Bold))
-            lbl_v.setStyleSheet(f"color:{_COR[v]}; border:none;")
+            lbl_v.setFont(QFont(FONT_SANS, 10, QFont.Weight.Bold))
+            lbl_v.setStyleSheet(f"color:{_COR[v]}; border:none; background:transparent;")
             
             self._boxes[v] = {
+                "frame": box,
                 "status": QLabel("Verificando..."),
                 "icon": QLabel("⚪")
             }
-            self._boxes[v]["status"].setFont(QFont(FONT_SANS, 10))
-            self._boxes[v]["status"].setStyleSheet(f"color:{COLORS.get('text')}; border:none;")
-            self._boxes[v]["icon"].setFixedWidth(24)
+            self._boxes[v]["status"].setFont(QFont(FONT_SANS, 8))
+            self._boxes[v]["status"].setStyleSheet(f"color:{COLORS.get('text_dim')}; border:none; background:transparent;")
+            self._boxes[v]["icon"].setFixedWidth(16)
             self._boxes[v]["icon"].setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._boxes[v]["icon"].setStyleSheet("background:transparent; border:none;")
             
-            row = QHBoxLayout()
-            row.addWidget(self._boxes[v]["icon"])
-            row.addWidget(self._boxes[v]["status"], 1)
+            top_row.addWidget(lbl_v, 1)
+            top_row.addWidget(self._boxes[v]["icon"])
+            top_row.addWidget(self._boxes[v]["status"])
             
-            bl.addWidget(lbl_v)
-            bl.addLayout(row)
+            # Linha Inferior: Botões (Slim)
+            self._actions_lay = QHBoxLayout()
+            self._actions_lay.setSpacing(4)
+            
+            self._btn_start   = QPushButton("Iniciar")
+            self._btn_stop    = QPushButton("Parar")
+            self._btn_restart = QPushButton("Reiniciar")
+            
+            for btn, acao in [(self._btn_start, "iniciar"), (self._btn_stop, "parar"), (self._btn_restart, "reiniciar")]:
+                btn.setFixedHeight(22)
+                btn.setFont(QFont(FONT_SANS, 8))
+                btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn.clicked.connect(lambda _, versao=v, a=acao: self.acao_solicitada.emit(versao, a))
+                self._actions_lay.addWidget(btn)
+            
+            self._boxes[v].update({
+                "btn_start": self._btn_start,
+                "btn_stop": self._btn_stop,
+                "btn_restart": self._btn_restart
+            })
+            
+            bl.addLayout(top_row)
+            bl.addLayout(self._actions_lay)
             lay.addWidget(box)
         
         lay.addStretch()
         self._upd_style()
+        theme_manager.theme_changed.connect(lambda _: self._upd_style())
 
     def atualizar(self, st: dict):
         for v in ("3", "4"):
             d = st[f"fb{v}"]
             rodando = d["rodando"]
+            instalado = d["instalado"]
+            
+            # Visibilidade dos botões
+            self._boxes[v]["btn_start"].setVisible(not rodando and instalado)
+            self._boxes[v]["btn_stop"].setVisible(rodando)
+            self._boxes[v]["btn_restart"].setVisible(rodando)
+            
             if rodando:
                 self._boxes[v]["status"].setText("Ativo")
                 self._boxes[v]["icon"].setText("🟢")
-            elif d["instalado"]:
+            elif instalado:
                 self._boxes[v]["status"].setText("Inativo")
                 self._boxes[v]["icon"].setText("🔴")
             else:
@@ -1156,13 +1341,48 @@ class _StatusDashboard(QFrame):
                 self._boxes[v]["icon"].setText("⚪")
 
     def _upd_style(self):
+        bg    = COLORS.get('bg')
+        brd   = COLORS.get('border')
+        surf  = COLORS.get('surface', '#1e1e1e')
+        surf2 = COLORS.get('surface2', '#2a2a2a')
+        
         self.setStyleSheet(f"""
             QFrame#status_dashboard {{
-                background:{COLORS.get('surface','#1e1e1e')};
-                border:1px solid {COLORS.get('border','#444')};
+                background:{surf};
+                border:1px solid {brd};
                 border-radius:12px;
             }}
         """)
+        
+        for v in ("3", "4"):
+            acc = _COR[v]
+            self._boxes[v]["frame"].setStyleSheet(f"""
+                QFrame#dash_box_{v} {{
+                    background:{bg};
+                    border:1px solid {brd};
+                    border-radius:8px;
+                }}
+                QFrame#dash_box_{v}:hover {{
+                    border:1.5px solid {acc};
+                    background:{surf2};
+                }}
+            """)
+            btn_style = f"""
+                QPushButton {{
+                    background: transparent;
+                    color: {acc};
+                    border: 1px solid {acc};
+                    border-radius: 4px;
+                    padding: 0px 4px;
+                }}
+                QPushButton:hover {{
+                    background: {acc};
+                    color: #fff;
+                }}
+            """
+            self._boxes[v]["btn_start"].setStyleSheet(btn_style)
+            self._boxes[v]["btn_stop"].setStyleSheet(btn_style)
+            self._boxes[v]["btn_restart"].setStyleSheet(btn_style)
 
 # =============================================================================
 # Página principal
@@ -1191,20 +1411,9 @@ class PageFbPortable(QWidget):
     # =========================================================================
 
     def _build_ui(self):
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
-
-        # -- Container principal com scroll -------------------------------
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-
-        inner = QWidget()
-        lay   = QVBoxLayout(inner)
-        lay.setContentsMargins(40, 36, 40, 20)
-        lay.setSpacing(10)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(20, 16, 20, 12)
+        lay.setSpacing(8)
 
         lay.addWidget(PageTitle(
             "FIREBIRD PORTABLE",
@@ -1226,9 +1435,8 @@ class PageFbPortable(QWidget):
 
         # -- ABA 1: Controle de versões ------------------------------------
         tab_controle = QWidget()
-        tab_controle.setMinimumWidth(660)
         tlay_root = QVBoxLayout(tab_controle)
-        tlay_root.setContentsMargins(0, 16, 0, 0)
+        tlay_root.setContentsMargins(16, 16, 16, 16)
         tlay_root.setSpacing(10)
 
         info = label(
@@ -1242,9 +1450,9 @@ class PageFbPortable(QWidget):
         
         # Dashboard de Status Geral
         self._dashboard = _StatusDashboard()
+        self._dashboard.versao_clicada.connect(self._on_dash_v_clicada)
+        self._dashboard.acao_solicitada.connect(self._on_dash_acao)
         tlay_root.addWidget(self._dashboard)
-        
-        tlay_root.addWidget(spacer(h=6))
 
         # Cards FB3 e FB4 lado a lado com scroll horizontal se necessário
         tf = QFrame()
@@ -1281,12 +1489,35 @@ class PageFbPortable(QWidget):
 
         tlay_root.addWidget(tf)
         tlay_root.addStretch()
-        # Wrap em scroll para suportar janelas estreitas
-        scroll_controle = QScrollArea()
-        scroll_controle.setWidgetResizable(True)
-        scroll_controle.setFrameShape(QScrollArea.Shape.NoFrame)
-        scroll_controle.setWidget(tab_controle)
-        self._tabs.addTab(scroll_controle, "🔄 Controle de Versões")
+
+        # -- ABA 0: Instalação Automática ----------------------------------
+        tab_auto = QWidget()
+        alay = QVBoxLayout(tab_auto)
+        alay.setContentsMargins(16, 16, 16, 16)
+        alay.setSpacing(10)
+
+        desc_auto = label(
+            "Utilize este assistente para instalar e configurar o Firebird de forma totalmente automatizada.",
+            COLORS["text_mid"], 10
+        )
+        desc_auto.setWordWrap(True)
+        alay.addWidget(desc_auto)
+
+        card_lay = QHBoxLayout()
+        card_lay.setSpacing(16)
+
+        self._auto_cards = {}
+        for v in ("3", "4"):
+            card = _AutoInstallCard(v)
+            card.acao_solicitada.connect(self._on_auto_install)
+            self._auto_cards[v] = card
+            card_lay.addWidget(card, 1)
+
+        alay.addLayout(card_lay)
+        alay.addStretch()
+
+        self._tabs.addTab(tab_auto, "🚀 Instalação Automática")
+        self._tabs.addTab(tab_controle, "🔄 Controle de Versões")
 
         # -- ABA 2: Instalar / Remover -------------------------------------
         tab_instalar = QWidget()
@@ -1300,7 +1531,6 @@ class PageFbPortable(QWidget):
         )
         nota.setWordWrap(True)
         ilay.addWidget(nota)
-        ilay.addWidget(spacer(h=4))
 
         self._radio_group = QButtonGroup(self)
         radio_row = QHBoxLayout()
@@ -1319,11 +1549,9 @@ class PageFbPortable(QWidget):
 
         self._lbl_porta = label("", COLORS["text_dim"], 9)
         ilay.addWidget(self._lbl_porta)
-        ilay.addWidget(spacer(h=4))
 
         self._card_status = _StatusCard()
         ilay.addWidget(self._card_status)
-        ilay.addWidget(spacer(h=6))
 
         self._btn_instalar = make_primary_btn("INSTALAR", 160)
         self._btn_instalar.clicked.connect(self._on_instalar)
@@ -1332,8 +1560,6 @@ class PageFbPortable(QWidget):
         btn_voltar = make_secondary_btn("VOLTAR", 80)
         btn_voltar.clicked.connect(self.go_menu.emit)
         ilay.addWidget(btn_row(self._btn_instalar, self._btn_remover, btn_voltar))
-
-        ilay.addWidget(spacer(h=6))
         self._progress = QProgressBar()
         self._progress.setRange(0, 100)
         self._progress.setValue(0)
@@ -1353,8 +1579,8 @@ class PageFbPortable(QWidget):
         # -- ABA 3: Banco de Dados -----------------------------------------
         tab_db = QWidget()
         dlay = QVBoxLayout(tab_db)
-        dlay.setContentsMargins(0, 16, 0, 0)
-        dlay.setSpacing(10)
+        dlay.setContentsMargins(16, 16, 16, 16)
+        dlay.setSpacing(8)
 
         nota_db = label(
             "Configure quais bancos de dados o Firebird Portable irá expor. "
@@ -1363,7 +1589,6 @@ class PageFbPortable(QWidget):
         )
         nota_db.setWordWrap(True)
         dlay.addWidget(nota_db)
-        dlay.addWidget(spacer(h=4))
 
         self._db_conf_card = _DatabasesConfCard()
         dlay.addWidget(self._db_conf_card)
@@ -1371,7 +1596,26 @@ class PageFbPortable(QWidget):
 
         self._tabs.addTab(tab_db, "💾 Banco de Dados")
 
-        # -- ABA 4: Logs ---------------------------------------------------
+        # -- ABA 4: Configurações Oficiais FB4 -----------------------------
+        tab_fb4 = QWidget()
+        flay = QVBoxLayout(tab_fb4)
+        flay.setContentsMargins(16, 16, 16, 16)
+        flay.setSpacing(8)
+
+        nota_fb4 = label(
+            "Utilize esta ferramenta para restaurar os arquivos de configuração padrão do Firebird 4.",
+            COLORS["text_dim"], 9,
+        )
+        nota_fb4.setWordWrap(True)
+        flay.addWidget(nota_fb4)
+
+        self._fb4_conf_card = _Fb4ConfigCard()
+        flay.addWidget(self._fb4_conf_card)
+        flay.addStretch()
+
+        self._tabs.addTab(tab_fb4, "⚙️ Configurações FB4")
+
+        # -- ABA 5: Logs ---------------------------------------------------
         tab_log = QWidget()
         llay = QVBoxLayout(tab_log)
         llay.setContentsMargins(0, 8, 0, 0)
@@ -1395,8 +1639,6 @@ class PageFbPortable(QWidget):
         self._tabs.addTab(tab_log, "📜 Logs")
 
         lay.addStretch()
-        scroll.setWidget(inner)
-        root.addWidget(scroll)
 
         self._upd_style()
         self._on_versao_changed("4")
@@ -1527,6 +1769,48 @@ class PageFbPortable(QWidget):
         else:
             self._alerta(f"Erro: {r['erro']}", "error")
 
+    def _on_dash_v_clicada(self, versao: str):
+        """Clique no card do dashboard alterna a ativação."""
+        # Somente se o clique não for nos botões (já tratado pelos sinais individuais)
+        # Na verdade, o frame pai captura o clique. Se clicou no frame (espaço vazio), alterna.
+        if self._worker: return
+        row = self._toggle_rows.get(versao)
+        if row and row.toggle.isEnabled():
+            row.toggle.setChecked(not row.toggle.isChecked())
+
+    def _on_dash_acao(self, versao: str, acao: str):
+        if self._worker: return
+        
+        if acao == "reiniciar":
+            self._on_reiniciar(versao)
+        elif acao == "iniciar":
+            row = self._toggle_rows.get(versao)
+            if row and row.toggle.isEnabled():
+                row.toggle.setChecked(True)
+        elif acao == "parar":
+            row = self._toggle_rows.get(versao)
+            if row and row.toggle.isEnabled():
+                row.toggle.setChecked(False)
+
+    def _on_reiniciar(self, versao: str):
+        self._setar_ocupado(True)
+        self._console.limpar()
+        self._console.append(f"Reiniciando {FB_CONFIGS[versao]['label']} ...")
+        worker = _ReiniciarWorker(versao)
+        worker.log.connect(self._console.append)
+        worker.concluido.connect(self._on_reiniciar_concluido)
+        worker.finished.connect(lambda: self._limpar_worker(worker))
+        self._worker = worker
+        worker.start()
+
+    def _on_reiniciar_concluido(self, r: dict):
+        self._setar_ocupado(False)
+        self._atualizar_status()
+        if r["ok"]:
+            self._alerta("Reiniciado com sucesso!", "success")
+        else:
+            self._alerta(f"Erro ao reiniciar: {r['erro']}", "error")
+
     # =========================================================================
     # Status geral (timer + pós-ações)
     # =========================================================================
@@ -1579,6 +1863,12 @@ class PageFbPortable(QWidget):
 
         self._dashboard.atualizar(st)
 
+        # Atualiza os cards de instalação automática
+        for v in ("3", "4"):
+            inst = st[f"fb{v}"]["instalado"]
+            if v in self._auto_cards:
+                self._auto_cards[v].set_installed(inst)
+
         if st.get("conflito"):
             self._alerta(
                 "FB3 e FB4 estão ativos simultaneamente — isso pode causar conflitos.",
@@ -1590,6 +1880,53 @@ class PageFbPortable(QWidget):
     # =========================================================================
     # Instalação / Remoção
     # =========================================================================
+
+    def _on_auto_install(self, versao: str):
+        if not is_admin():
+            self._alerta("Permissão de administrador necessária para instalação automática.", "warn")
+            return
+
+        card = self._auto_cards.get(versao)
+        if card: card.set_loading(True, "Iniciando...", 0)
+
+        self._setar_ocupado(True)
+        self._console.limpar()
+        self._alert.setVisible(False)
+        self._console.append(f"Iniciando Instalação Automática do Firebird {versao}...")
+        
+        worker = _AutoInstallWorker(versao)
+        worker.log.connect(self._console.append)
+        if card:
+            worker.log.connect(lambda msg: card.set_loading(True, msg))
+            worker.progresso.connect(lambda val: card.set_loading(True, progress=val))
+
+        worker.concluido.connect(self._on_auto_install_concluido)
+        worker.finished.connect(lambda: self._limpar_worker(worker))
+        self._worker = worker
+        worker.start()
+
+    def _on_auto_install_concluido(self, r: dict):
+        versao = r.get("versao", "3")
+        card = self._auto_cards.get(versao)
+        if card: card.set_loading(False)
+
+        self._setar_ocupado(False)
+
+        if r["ok"]:
+            versao = r.get("versao", "3")
+            msg = (
+                f"Firebird {versao} instalado e iniciado com sucesso!\n"
+                "Agora, o sistema irá procurar seus bancos de dados para completar a configuração."
+            )
+            self._alerta(msg, "success")
+            
+            # PASSO 4 e 5: Mudar para a aba de Banco de Dados e disparar a varredura
+            self._tabs.setCurrentIndex(3) # Índice da aba "💾 Banco de Dados"
+            
+            # Dá um pequeno delay para o usuário ver a troca de aba antes de começar a varredura
+            QTimer.singleShot(1000, self._db_conf_card._on_varrer)
+        else:
+            self._alerta(f"Falha na instalação automática: {r.get('erro', 'Erro desconhecido')}", "error")
 
     def _on_versao_changed(self, versao: str):
         self._versao_sel = versao

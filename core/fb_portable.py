@@ -1408,6 +1408,13 @@ def ativar_fb_servico(versao: str, log_fn=None) -> dict:
     else:
         log(f"Servico '{nome}' com binPath valido — prosseguindo.")
 
+    # Se a outra versão estiver rodando (serviço ou processo), para agora
+    outra = "4" if versao == "3" else "3"
+    if _outra_versao_rodando(versao):
+        log(f"Detectada outra versao rodando — inativando {FB_CONFIGS[outra]['label']} para evitar conflitos...")
+        inativar_fb(outra, log_fn)
+        time.sleep(1)
+
     if _servico_desabilitado(nome):
         log(f"Habilitando servico '{nome}' ...")
         subprocess.run(["sc", "config", nome, "start=", "auto"], capture_output=True, timeout=10)
@@ -1541,9 +1548,13 @@ def ativar_fb(versao: str, log_fn=None) -> dict:
         outra     = "4" if versao == "3" else "3"
         outra_lbl = FB_CONFIGS[outra]["label"]
         esta_lbl  = FB_CONFIGS[versao]["label"]
-        msg = f"{outra_lbl} está ativo. Inative-o antes de ativar o {esta_lbl}."
-        log(f"BLOQUEADO: {msg}")
-        return {"ok": False, "erro": msg}
+        log(f"Detectada outra versao rodando — inativando {outra_lbl} para ativar o {esta_lbl}...")
+        inativar_fb(outra, log_fn)
+        time.sleep(1)
+        if _outra_versao_rodando(versao):
+            msg = f"Nao foi possivel inativar o {outra_lbl} automaticamente."
+            log(f"ERRO: {msg}")
+            return {"ok": False, "erro": msg}
 
     modo = fb_obter_modo(versao)
     if modo == "servico":
@@ -2240,3 +2251,34 @@ def configurar_databases_fb3(caminho_dados: str, log_fn=None) -> dict:
 
 def configurar_databases_fb4(caminho_dados: str, log_fn=None) -> dict:
     return atualizar_databases_conf("4", caminho_dados, log_fn)
+
+
+def reiniciar_fb(versao: str, log_fn=None) -> dict:
+    """Para e inicia o Firebird novamente, respeitando o modo atual."""
+
+    def log(m):
+        if log_fn:
+            log_fn(m)
+
+    log(f"Reiniciando Firebird {versao} ...")
+
+    # Garante que a outra versão pare se estiver rodando
+    outra = "4" if versao == "3" else "3"
+    if _outra_versao_rodando(versao):
+        log(f"Detectada outra versao rodando — inativando {FB_CONFIGS[outra]['label']} para evitar conflitos...")
+        inativar_fb(outra, log_fn)
+        time.sleep(1)
+
+    st = status_detalhado()
+    d = st[f"fb{versao}"]
+
+    if d["modo"] == "servico" and d["servico_reg"]:
+        log("Modo: Servico Windows")
+        inativar_fb_servico(versao, log_fn)
+        time.sleep(1)
+        return ativar_fb_servico(versao, log_fn)
+    else:
+        log("Modo: Processo portable")
+        inativar_fb(versao, log_fn)
+        time.sleep(1)
+        return ativar_fb(versao, log_fn)
