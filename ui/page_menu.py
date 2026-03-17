@@ -2,7 +2,9 @@
 # FUTURA SETUP — Página: Menu Principal
 # =============================================================================
 
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QFrame
+)
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtGui import QFont
 
@@ -11,10 +13,9 @@ from ui.theme import COLORS, FONT_SANS
 from ui.theme_manager import theme_manager
 
 
-class ActionButton(QWidget):
+class ActionCard(QWidget):
     """
-    Card de ação do menu principal.
-    Emite clicked() ao ser pressionado.
+    Card de acao no estilo grade - numero grande destacado, titulo e descricao.
     """
     clicked = pyqtSignal()
 
@@ -24,92 +25,62 @@ class ActionButton(QWidget):
         self._accent = accent
         self._state  = "normal"
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedHeight(76)
+        self.setMinimumHeight(88)
 
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(0, 0, 16, 0)
-        lay.setSpacing(0)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(16, 14, 16, 14)
+        lay.setSpacing(3)
 
-        self._badge = QLabel(number)
-        self._badge.setFixedSize(60, 76)
-        self._badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._badge.setFont(QFont(FONT_SANS, 12, QFont.Weight.Bold))
-
-        self._div = QWidget()
-        self._div.setFixedSize(1, 76)
-
-        txt_w = QWidget()
-        txt_w.setObjectName("txt_w")
-        txt = QVBoxLayout(txt_w)
-        txt.setSpacing(4)
-        txt.setContentsMargins(18, 0, 0, 0)
+        self._num_lbl = QLabel(number)
+        self._num_lbl.setFont(QFont(FONT_SANS, 20, QFont.Weight.Bold))
 
         self._title_lbl = QLabel(title)
-        self._title_lbl.setObjectName("btn_title")
-        self._title_lbl.setFont(QFont(FONT_SANS, 13, QFont.Weight.Bold))
+        self._title_lbl.setFont(QFont(FONT_SANS, 12, QFont.Weight.Bold))
+        self._title_lbl.setObjectName("card_title")
 
         self._desc_lbl = QLabel(description)
-        self._desc_lbl.setObjectName("btn_desc")
-        self._desc_lbl.setFont(QFont(FONT_SANS, 11))
+        self._desc_lbl.setFont(QFont(FONT_SANS, 10))
+        self._desc_lbl.setObjectName("card_desc")
+        self._desc_lbl.setWordWrap(True)
 
-        txt.addStretch()
-        txt.addWidget(self._title_lbl)
-        txt.addWidget(self._desc_lbl)
-        txt.addStretch()
-
-        self._arrow = QLabel("›")
-        self._arrow.setObjectName("btn_arrow")
-        self._arrow.setFont(QFont(FONT_SANS, 18))
-        self._arrow.setFixedWidth(20)
-        self._arrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        lay.addWidget(self._badge)
-        lay.addWidget(self._div)
-        lay.addWidget(txt_w, 1)
-        lay.addWidget(self._arrow)
+        lay.addWidget(self._num_lbl)
+        lay.addWidget(self._title_lbl)
+        lay.addWidget(self._desc_lbl)
+        lay.addStretch()
 
         self._upd()
         theme_manager.theme_changed.connect(self._upd)
 
     def _upd(self, _mode: str = ""):
         if self._state == "hover":
-            bg, border = COLORS["accent_dim"], self._accent
+            bg     = COLORS["accent_dim"]
+            border = self._accent
         elif self._state == "press":
-            bg, border = COLORS["panel_press"], self._accent
+            bg     = COLORS["panel_press"]
+            border = self._accent
         else:
-            bg, border = COLORS["surface"], COLORS["border"]
+            bg     = COLORS["surface"]
+            border = COLORS["border"]
 
         self.setStyleSheet(f"""
-            ActionButton {{
+            ActionCard {{
                 background: {bg};
                 border: 1.5px solid {border};
-                border-radius: 8px;
+                border-radius: 10px;
             }}
-            QLabel#btn_title {{
+            QLabel#card_title {{
                 color: {COLORS['text']};
-                border: none;
                 background: transparent;
-            }}
-            QLabel#btn_desc {{
-                color: {COLORS['text_mid']};
                 border: none;
-                background: transparent;
             }}
-            QLabel#btn_arrow {{
+            QLabel#card_desc {{
                 color: {COLORS['text_dim']};
-                border: none;
                 background: transparent;
-            }}
-            QWidget#txt_w {{
                 border: none;
-                background: transparent;
             }}
         """)
-        self._badge.setStyleSheet(
-            f"color: {self._accent}; border: none; background: transparent;"
-        )
-        self._div.setStyleSheet(
-            f"background: {COLORS['border']}; border: none;"
+        self._num_lbl.setStyleSheet(
+            f"color: {self._accent}; background: transparent; border: none;"
         )
 
     def enterEvent(self, e):
@@ -133,6 +104,20 @@ class ActionButton(QWidget):
                 self.clicked.emit()
 
 
+class SectionLabel(QLabel):
+    def __init__(self, text: str, parent=None):
+        super().__init__(text, parent)
+        self.setFont(QFont(FONT_SANS, 9, QFont.Weight.Bold))
+        self._upd()
+        theme_manager.theme_changed.connect(self._upd)
+
+    def _upd(self, _mode: str = ""):
+        self.setStyleSheet(
+            f"color: {COLORS['text_dim']}; background: transparent;"
+            f"padding: 4px 0px; letter-spacing: 1px;"
+        )
+
+
 class PageMenu(QWidget):
     go_atalhos           = pyqtSignal()
     go_terminal          = pyqtSignal()
@@ -149,33 +134,73 @@ class PageMenu(QWidget):
         lay.setSpacing(0)
 
         lay.addWidget(PageTitle("FUTURA SETUP", "Menu Principal"))
+        lay.addWidget(spacer(h=8))
 
-        btn_lay = QVBoxLayout()
-        btn_lay.setSpacing(12)
-        btn_lay.setContentsMargins(0, 8, 0, 0)
+        # Secao: Implantacao
+        lay.addWidget(SectionLabel("IMPLANTACAO"))
+        lay.addWidget(spacer(h=6))
 
-        items = [
-            ("01", "Puxar via Rede",
-             "Cria atalhos que executam os aplicativos direto do servidor",
-             COLORS["accent"], self.go_atalhos),
-            ("02", "Novo Terminal",
-             "Copia os arquivos para este PC e configura um terminal autonomo",
-             COLORS["accent"], self.go_terminal),
-            ("03", "Atualizar Sistema",
-             "Baixa e executa a atualizacao completa do ERP Futura",
-             COLORS["accent"], self.go_atualizacao),
-            ("04", "Instalar Firebird",
-             "Baixa e instala o Firebird 3 ou 4 silenciosamente",
-             COLORS["accent2"], self.go_instalar_firebird),
-            ("05", "Firebird Portable",
-             "Instala e configura FB3 e FB4 portable de forma independente",
-             COLORS["accent2"], self.go_fb_portable),
-        ]
+        grid_impl = QGridLayout()
+        grid_impl.setSpacing(10)
 
-        for num, title, desc, accent, sig in items:
-            btn = ActionButton(num, title, desc, accent)
-            btn.clicked.connect(sig.emit)
-            btn_lay.addWidget(btn)
+        card_atalhos = ActionCard(
+            "01", "Puxar via Rede",
+            "Cria atalhos que executam os aplicativos direto do servidor",
+            COLORS["accent"],
+        )
+        card_atalhos.clicked.connect(self.go_atalhos.emit)
 
-        lay.addLayout(btn_lay)
+        card_terminal = ActionCard(
+            "02", "Novo Terminal",
+            "Copia os arquivos e configura um terminal autonomo",
+            COLORS["accent"],
+        )
+        card_terminal.clicked.connect(self.go_terminal.emit)
+
+        card_atualizacao = ActionCard(
+            "03", "Atualizar Sistema",
+            "Baixa e executa a atualizacao completa do ERP Futura",
+            COLORS["accent"],
+        )
+        card_atualizacao.clicked.connect(self.go_atualizacao.emit)
+
+        grid_impl.addWidget(card_atalhos,     0, 0)
+        grid_impl.addWidget(card_terminal,    0, 1)
+        grid_impl.addWidget(card_atualizacao, 1, 0, 1, 2)
+
+        lay.addLayout(grid_impl)
+        lay.addWidget(spacer(h=20))
+
+        # Divisor
+        div = QFrame()
+        div.setFrameShape(QFrame.Shape.HLine)
+        div.setStyleSheet(f"color: {COLORS.get('border', '#444')};")
+        lay.addWidget(div)
+        lay.addWidget(spacer(h=12))
+
+        # Secao: Firebird
+        lay.addWidget(SectionLabel("FIREBIRD"))
+        lay.addWidget(spacer(h=6))
+
+        grid_fb = QGridLayout()
+        grid_fb.setSpacing(10)
+
+        card_instalar = ActionCard(
+            "04", "Instalar Firebird",
+            "Baixa e instala o Firebird 3 ou 4 silenciosamente",
+            COLORS["accent2"],
+        )
+        card_instalar.clicked.connect(self.go_instalar_firebird.emit)
+
+        card_portable = ActionCard(
+            "05", "Firebird Portable",
+            "Instala e configura FB3 e FB4 de forma independente",
+            COLORS["accent2"],
+        )
+        card_portable.clicked.connect(self.go_fb_portable.emit)
+
+        grid_fb.addWidget(card_instalar, 0, 0)
+        grid_fb.addWidget(card_portable, 0, 1)
+
+        lay.addLayout(grid_fb)
         lay.addStretch()

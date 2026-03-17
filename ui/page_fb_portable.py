@@ -230,7 +230,7 @@ class _ModoCard(QFrame):
         titulo = QLabel("Modo de execução")
         titulo.setFont(QFont(FONT_SANS, 10, QFont.Weight.Bold))
         titulo.setStyleSheet(
-            f"color:{COLORS.get('text','#fff')}; background:transparent; border:none;"
+            f"color:{COLORS.get('text')}; background:transparent; border:none;"
         )
         lay.addWidget(titulo)
 
@@ -257,22 +257,23 @@ class _ModoCard(QFrame):
         div.setStyleSheet(f"color:{COLORS.get('border','#444')};")
         lay.addWidget(div)
 
-        desc_row = QHBoxLayout()
-        desc_row.setSpacing(12)
         self._lbl_desc = QLabel()
         self._lbl_desc.setFont(QFont(FONT_SANS, 9))
         self._lbl_desc.setWordWrap(True)
         self._lbl_desc.setStyleSheet(
             f"color:{COLORS.get('text_dim','#888')}; background:transparent; border:none;"
         )
+        lay.addWidget(self._lbl_desc)
+
+        btn_lay = QHBoxLayout()
+        btn_lay.addStretch()
         self._btn_acao = QPushButton()
-        self._btn_acao.setFixedHeight(28)
+        self._btn_acao.setFixedHeight(30)
         self._btn_acao.setFont(QFont(FONT_SANS, 9))
         self._btn_acao.setCursor(Qt.CursorShape.PointingHandCursor)
         self._btn_acao.clicked.connect(self._on_btn)
-        desc_row.addWidget(self._lbl_desc, 1)
-        desc_row.addWidget(self._btn_acao)
-        lay.addLayout(desc_row)
+        btn_lay.addWidget(self._btn_acao)
+        lay.addLayout(btn_lay)
 
         self._lbl_nota = QLabel("[!] Requer privilegios de administrador")
         self._lbl_nota.setFont(QFont(FONT_SANS, 8))
@@ -340,7 +341,9 @@ class _ModoCard(QFrame):
             self._btn_acao.setText("Registrar como Serviço Windows")
             self._btn_acao.setStyleSheet(self._style_primary())
 
+        self._lbl_desc.setVisible(True)
         self._lbl_nota.setVisible(not is_admin())
+        self._upd_style()
 
     def _on_btn(self):
         acao = "remover" if self._svc_registrado else "registrar"
@@ -351,31 +354,38 @@ class _ModoCard(QFrame):
 
     def _style_primary(self) -> str:
         acc = _COR[self._versao]
+        text_btn = "#ffffff" if theme_manager.mode == "light" else "#001828"
         return f"""
             QPushButton {{
-                background:{acc}; color:#fff; border:none;
-                border-radius:5px; padding:4px 12px; font-weight:bold;
+                background:{acc}; color:{text_btn}; border:none;
+                border-radius:5px; padding:6px 16px; font-weight:bold;
             }}
             QPushButton:hover {{ opacity: 0.85; }}
-            QPushButton:disabled {{ background:{COLORS.get('border','#444')}; color:#888; }}
+            QPushButton:disabled {{ background:{COLORS.get('border','#444')}; color:{COLORS.get('text_disabled','#888')}; }}
         """
 
     def _style_danger(self) -> str:
-        return """
-            QPushButton {
-                background:#c0392b; color:#fff; border:none;
-                border-radius:5px; padding:4px 12px; font-weight:bold;
-            }
-            QPushButton:hover { background:#e74c3c; }
-            QPushButton:disabled { background:#555; color:#888; }
+        text_btn = "#ffffff"
+        return f"""
+            QPushButton {{
+                background:#c0392b; color:{text_btn}; border:none;
+                border-radius:5px; padding:6px 16px; font-weight:bold;
+            }}
+            QPushButton:hover {{ background:#e74c3c; }}
+            QPushButton:disabled {{ background:#555; color:#888; }}
         """
 
     def _upd_style(self, _=""):
         self.setStyleSheet(f"""
             QFrame#modo_card_{self._versao} {{
-                background:{COLORS.get('bg','#121212')};
+                background:{COLORS.get('surface','#1e1e1e')};
                 border:1px solid {COLORS.get('border','#444')};
-                border-radius:8px;
+                border-radius:12px;
+                padding: 4px;
+            }}
+            QFrame#modo_card_{self._versao}:hover {{
+                border:1px solid {_COR[self._versao]};
+                background:{COLORS.get('surface2','#1a1a1a')};
             }}
         """)
 
@@ -389,6 +399,7 @@ class _ToggleRow(QWidget):
         super().__init__(parent)
         self._versao = versao
         self._cor    = _COR[versao]
+        self.setObjectName(f"toggle_row_{self._versao}")
 
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -406,7 +417,7 @@ class _ToggleRow(QWidget):
         self._lbl_titulo = QLabel(FB_CONFIGS[versao]["label"])
         self._lbl_titulo.setFont(QFont(FONT_SANS, 12, QFont.Weight.Bold))
         self._lbl_titulo.setStyleSheet(
-            f"color:{COLORS.get('text','#fff')}; background:transparent; border:none;"
+            f"color:{COLORS.get('text')}; background:transparent; border:none;"
         )
         self._lbl_detalhe = QLabel(detalhe)
         self._lbl_detalhe.setFont(QFont(FONT_MONO, 9))
@@ -428,12 +439,29 @@ class _ToggleRow(QWidget):
         lay.addLayout(col, 1)
         lay.addWidget(self._badge)
         lay.addWidget(self.toggle)
+        
+        self._upd_style()
+        theme_manager.theme_changed.connect(lambda _: self._upd_style())
+
+    def _upd_style(self):
+        self.setStyleSheet(f"""
+            QWidget#toggle_row_{self._versao} {{
+                background:{COLORS.get('surface','#1e1e1e')};
+                border:1px solid {COLORS.get('border','#444')};
+                border-radius:10px;
+                padding: 10px;
+            }}
+            _ToggleRow:hover {{
+                border:1px solid {_COR[self._versao]};
+                background:{COLORS.get('surface2','#1a1a1a')};
+            }}
+        """)
 
     def set_estado(self, ativo: bool, instalado: bool, detalhe: str = ""):
         cor = self._cor if ativo else COLORS.get("text_dim", "#888")
         self._dot.setStyleSheet(f"background:{cor}; border-radius:5px;")
         self._lbl_titulo.setStyleSheet(
-            f"color:{COLORS.get('text','#fff')}; background:transparent; border:none;"
+            f"color:{COLORS.get('text')}; background:transparent; border:none;"
         )
         if not instalado:
             self._lbl_detalhe.setText("Não instalado — use o painel abaixo para instalar")
@@ -474,8 +502,10 @@ class _StatusCard(QFrame):
         lay.setContentsMargins(16, 12, 16, 12)
         lay.setSpacing(12)
 
-        self._dot = QWidget()
-        self._dot.setFixedSize(10, 10)
+        self._icon = QLabel("📦")
+        self._icon.setFont(QFont(FONT_SANS, 18))
+        self._icon.setFixedWidth(32)
+        
         col = QVBoxLayout()
         col.setSpacing(2)
         self._lbl_status  = QLabel()
@@ -484,7 +514,7 @@ class _StatusCard(QFrame):
         self._lbl_detalhe.setFont(QFont(FONT_MONO, 9))
         col.addWidget(self._lbl_status)
         col.addWidget(self._lbl_detalhe)
-        lay.addWidget(self._dot)
+        lay.addWidget(self._icon)
         lay.addLayout(col, 1)
 
         self._data = (False, "", "", "")
@@ -496,7 +526,8 @@ class _StatusCard(QFrame):
     def atualizar(self, instalado: bool, ver_str: str, fb_dir: str, label_v: str):
         self._data = (instalado, ver_str, fb_dir, label_v)
         cor = COLORS.get("accent2", "#2ecc71") if instalado else COLORS.get("text_dim", "#888")
-        self._dot.setStyleSheet(f"background:{cor}; border-radius:5px;")
+        # self._dot.setStyleSheet(f"background:{cor}; border-radius:5px;") # Removido ponto
+        self._icon.setText("✅" if instalado else "❌")
         if instalado:
             self._lbl_status.setText(f"{label_v} instalado")
             self._lbl_detalhe.setText(
@@ -1024,7 +1055,7 @@ class _DatabasesConfCard(QFrame):
         surf = COLORS.get("surface", "#1e1e1e")
         brd  = COLORS.get("border",  "#444")
         acc  = COLORS.get("accent",  "#0078d4")
-        txt  = COLORS.get("text",    "#fff")
+        txt  = COLORS.get("text")
         return f"""
             QListWidget {{
                 background:{bg}; color:{txt};
@@ -1058,6 +1089,80 @@ class _DatabasesConfCard(QFrame):
             }}
         """)
 
+
+# =============================================================================
+# Dashboard de Status Geral
+# =============================================================================
+
+class _StatusDashboard(QFrame):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("status_dashboard")
+        self.setFixedHeight(90)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(16, 8, 16, 8)
+        lay.setSpacing(16)
+
+        self._boxes = {}
+        for v in ("3", "4"):
+            box = QFrame()
+            box.setFixedWidth(240)
+            box.setStyleSheet(f"""
+                QFrame {{
+                    background:{COLORS.get('bg')};
+                    border:1px solid {COLORS.get('border')};
+                    border-radius:8px;
+                }}
+            """)
+            bl = QVBoxLayout(box)
+            bl.setSpacing(2)
+            
+            lbl_v = QLabel(f"Firebird {v}")
+            lbl_v.setFont(QFont(FONT_SANS, 9, QFont.Weight.Bold))
+            lbl_v.setStyleSheet(f"color:{_COR[v]}; border:none;")
+            
+            self._boxes[v] = {
+                "status": QLabel("Verificando..."),
+                "icon": QLabel("⚪")
+            }
+            self._boxes[v]["status"].setFont(QFont(FONT_SANS, 10))
+            self._boxes[v]["status"].setStyleSheet(f"color:{COLORS.get('text')}; border:none;")
+            self._boxes[v]["icon"].setFixedWidth(24)
+            self._boxes[v]["icon"].setAlignment(Qt.AlignmentFlag.AlignCenter)
+            
+            row = QHBoxLayout()
+            row.addWidget(self._boxes[v]["icon"])
+            row.addWidget(self._boxes[v]["status"], 1)
+            
+            bl.addWidget(lbl_v)
+            bl.addLayout(row)
+            lay.addWidget(box)
+        
+        lay.addStretch()
+        self._upd_style()
+
+    def atualizar(self, st: dict):
+        for v in ("3", "4"):
+            d = st[f"fb{v}"]
+            rodando = d["rodando"]
+            if rodando:
+                self._boxes[v]["status"].setText("Ativo")
+                self._boxes[v]["icon"].setText("🟢")
+            elif d["instalado"]:
+                self._boxes[v]["status"].setText("Inativo")
+                self._boxes[v]["icon"].setText("🔴")
+            else:
+                self._boxes[v]["status"].setText("Não instalado")
+                self._boxes[v]["icon"].setText("⚪")
+
+    def _upd_style(self):
+        self.setStyleSheet(f"""
+            QFrame#status_dashboard {{
+                background:{COLORS.get('surface','#1e1e1e')};
+                border:1px solid {COLORS.get('border','#444')};
+                border-radius:12px;
+            }}
+        """)
 
 # =============================================================================
 # Página principal
@@ -1134,6 +1239,11 @@ class PageFbPortable(QWidget):
         )
         info.setWordWrap(True)
         tlay_root.addWidget(info)
+        
+        # Dashboard de Status Geral
+        self._dashboard = _StatusDashboard()
+        tlay_root.addWidget(self._dashboard)
+        
         tlay_root.addWidget(spacer(h=6))
 
         # Cards FB3 e FB4 lado a lado com scroll horizontal se necessário
@@ -1176,7 +1286,7 @@ class PageFbPortable(QWidget):
         scroll_controle.setWidgetResizable(True)
         scroll_controle.setFrameShape(QScrollArea.Shape.NoFrame)
         scroll_controle.setWidget(tab_controle)
-        self._tabs.addTab(scroll_controle, "Controle de Versoes")
+        self._tabs.addTab(scroll_controle, "🔄 Controle de Versões")
 
         # -- ABA 2: Instalar / Remover -------------------------------------
         tab_instalar = QWidget()
@@ -1238,7 +1348,7 @@ class PageFbPortable(QWidget):
 
         ilay.addStretch()
 
-        self._tabs.addTab(tab_instalar, "Instalar / Remover")
+        self._tabs.addTab(tab_instalar, "📥 Instalar / Remover")
 
         # -- ABA 3: Banco de Dados -----------------------------------------
         tab_db = QWidget()
@@ -1259,7 +1369,7 @@ class PageFbPortable(QWidget):
         dlay.addWidget(self._db_conf_card)
         dlay.addStretch()
 
-        self._tabs.addTab(tab_db, "Banco de Dados")
+        self._tabs.addTab(tab_db, "💾 Banco de Dados")
 
         # -- ABA 4: Logs ---------------------------------------------------
         tab_log = QWidget()
@@ -1282,7 +1392,7 @@ class PageFbPortable(QWidget):
         btn_limpar.clicked.connect(self._console.limpar)
         llay.addWidget(btn_limpar)
 
-        self._tabs.addTab(tab_log, "Logs")
+        self._tabs.addTab(tab_log, "📜 Logs")
 
         lay.addStretch()
         scroll.setWidget(inner)
@@ -1467,7 +1577,9 @@ class PageFbPortable(QWidget):
 
         self._upd_toggle = False
 
-        if st["conflito"]:
+        self._dashboard.atualizar(st)
+
+        if st.get("conflito"):
             self._alerta(
                 "FB3 e FB4 estão ativos simultaneamente — isso pode causar conflitos.",
                 "warn"

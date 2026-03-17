@@ -17,7 +17,13 @@ import tempfile
 import time
 import urllib.request
 import zipfile
+import psutil
 from typing import Callable
+
+from config import (
+    FB_PORTABLE_CONFIGS, FB3_INSTALLER_URL, FB4_REPO_ARQUIVOS,
+    MAX_TENTATIVAS_DOWNLOAD, CREATE_NO_WINDOW
+)
 
 # =============================================================================
 # Privilégios de administrador
@@ -48,39 +54,8 @@ def solicitar_admin() -> bool:
 # Configurações por versão
 # =============================================================================
 
-FB_CONFIGS = {
-    "3": {
-        "dir":          r"C:\FuturaFirebird\FB3",
-        "zip_url":      (
-            "https://github.com/FirebirdSQL/firebird/releases/download/"
-            "v3.0.13/Firebird-3.0.13.33818-0-x64.zip"
-        ),
-        "zip_size":     17 * 1024 * 1024,
-        "porta":        3050,
-        "label":        "Firebird 3 Portable",
-        "security_db":  "security3.fdb",
-        "servicos_win_oficiais": [
-            "FirebirdServerDefaultInstance",
-            "FirebirdGuardianDefaultInstance",
-            "FirebirdServer",
-            "Firebird",
-        ],
-        "servico_nome": "FuturaFirebirdFB3",
-    },
-    "4": {
-        "dir":          r"C:\FuturaFirebird\FB4",
-        "zip_url":      (
-            "https://github.com/FirebirdSQL/firebird/releases/download/"
-            "v4.0.6/Firebird-4.0.6.3221-0-x64.zip"
-        ),
-        "zip_size":     23 * 1024 * 1024,
-        "porta":        3050,
-        "label":        "Firebird 4 Portable",
-        "security_db":  "security4.fdb",
-        "servicos_win_oficiais": [],
-        "servico_nome": "FuturaFirebirdFB4",
-    },
-}
+# Redefine para compatibilidade com o código legado que usa FB_CONFIGS
+FB_CONFIGS = FB_PORTABLE_CONFIGS
 
 # Credenciais padrão do Futura
 _FB_USER     = "SYSDBA"
@@ -90,10 +65,7 @@ _FB_PASSWORD = "sbofutura"
 _SENHAS_FABRICA = ["masterkey", "masterke", ""]
 
 # URL do instalador oficial do FB3 (necessário para gerar o security3.fdb correto)
-_FB3_INSTALLER_URL = (
-    "https://github.com/FirebirdSQL/firebird/releases/download/"
-    "v3.0.13/Firebird-3.0.13.33818-0-x64.exe"
-)
+_FB3_INSTALLER_URL = FB3_INSTALLER_URL
 
 FB4_DIR  = FB_CONFIGS["4"]["dir"]
 FB4_GFIX = os.path.join(FB4_DIR, "gfix.exe")
@@ -441,24 +413,18 @@ def _parar_e_remover_fb3_oficial(log_fn=None):
     # Mata processos residuais do FB3 oficial (em Program Files)
     pf = r"C:\Program Files\Firebird\Firebird_3_0".lower()
     pf86 = r"C:\Program Files (x86)\Firebird\Firebird_3_0".lower()
-    for nome_exe in ["firebird.exe", "fbserver.exe", "fbguard.exe"]:
+    for proc in psutil.process_iter(['name', 'exe', 'pid']):
         try:
-            r = subprocess.run(
-                ["wmic", "process", "where", f"name='{nome_exe}'",
-                 "get", "ExecutablePath,ProcessId", "/FORMAT:CSV"],
-                capture_output=True, text=True, timeout=8,
-            )
-            for linha in r.stdout.splitlines():
-                linha_l = linha.lower()
-                if pf in linha_l or pf86 in linha_l:
-                    partes = linha.split(",")
-                    if len(partes) >= 3:
-                        pid = partes[-1].strip()
-                        if pid.isdigit():
-                            log(f"  [FB3] Encerrando processo oficial {nome_exe} (PID {pid}) ...")
-                            subprocess.run(["taskkill", "/F", "/PID", pid],
-                                           capture_output=True, timeout=10)
-        except Exception:
+            name = proc.info['name'].lower()
+            if name in ["firebird.exe", "fbserver.exe", "fbguard.exe"]:
+                exe_path = proc.info['exe']
+                if exe_path:
+                    exe_path_l = exe_path.lower()
+                    if pf in exe_path_l or pf86 in exe_path_l:
+                        pid = proc.info['pid']
+                        log(f"  [FB3] Encerrando processo oficial {name} (PID {pid}) ...")
+                        proc.kill()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
     time.sleep(2)
 
@@ -474,6 +440,7 @@ def _parar_e_remover_fb3_oficial(log_fn=None):
                 subprocess.run(
                     [unins, "/VERYSILENT", "/NORESTART"],
                     capture_output=True, timeout=60,
+                    creationflags=CREATE_NO_WINDOW
                 )
                 time.sleep(3)
                 log("  [FB3] FB3 oficial desinstalado.")
@@ -547,13 +514,33 @@ def _obter_security3_fdb_via_instalador(log_fn=None) -> bool:
 
     instalador_executado = False
     try:
-        req = urllib.request.Request(
-            _FB3_INSTALLER_URL,
-            headers={"User-Agent": "FuturaSetup/4.3"}
-        )
-        with urllib.request.urlopen(req, timeout=90) as resp:
-            with open(installer_path, "wb") as f:
-                shutil.copyfileobj(resp, f)
+        def _tentar_download():
+            req = urllib.request.Request(
+                _FB3_INSTALLER_URL,
+                headers={"User-Agent": "FuturaSetup/4.3"}
+            )
+            with urllib.request.urlopen(req, timeout=90) as resp:
+                with open(installer_path, "wb") as f:
+                    shutil.copyfileobj(resp, f)
+            return True
+
+        tentativas = 0
+        sucesso = False
+        while tentativas < MAX_TENTATIVAS_DOWNLOAD:
+            try:
+                if _tentar_download():
+                    sucesso = True
+                    break
+            except Exception as e:
+                tentativas += 1
+                log(f"    Falha no download (tentativa {tentativas}/{MAX_TENTATIVAS_DOWNLOAD}): {e}")
+                if tentativas < MAX_TENTATIVAS_DOWNLOAD:
+                    time.sleep(2)
+        
+        if not sucesso:
+            log("  [FB3] Falha definitiva no download do instalador.")
+            return False
+
         log(f"  [FB3] Instalador baixado ({os.path.getsize(installer_path):,} bytes).")
 
         log("  [FB3] Executando instalador silenciosamente ...")
@@ -926,7 +913,8 @@ def inicializar_security_db(versao: str, log_fn=None) -> bool:
 def _servico_existe(nome: str) -> bool:
     try:
         r = subprocess.run(["sc", "query", nome],
-                           capture_output=True, text=True, timeout=5)
+                           capture_output=True, text=True, timeout=5,
+                           creationflags=CREATE_NO_WINDOW)
         return r.returncode == 0
     except Exception:
         return False
@@ -935,7 +923,8 @@ def _servico_existe(nome: str) -> bool:
 def _servico_rodando(nome: str) -> bool:
     try:
         r = subprocess.run(["sc", "query", nome],
-                           capture_output=True, text=True, timeout=5)
+                           capture_output=True, text=True, timeout=5,
+                           creationflags=CREATE_NO_WINDOW)
         return "RUNNING" in r.stdout
     except Exception:
         return False
@@ -944,7 +933,8 @@ def _servico_rodando(nome: str) -> bool:
 def _servico_desabilitado(nome: str) -> bool:
     try:
         r = subprocess.run(["sc", "qc", nome],
-                           capture_output=True, text=True, timeout=5)
+                           capture_output=True, text=True, timeout=5,
+                           creationflags=CREATE_NO_WINDOW)
         return "DISABLED" in r.stdout.upper()
     except Exception:
         return False
@@ -959,6 +949,7 @@ def _servico_iniciar(nome: str, log_fn=None, timeout_s: int = 45) -> bool:
             capture_output=True, text=True,
             encoding="utf-8", errors="ignore",
             timeout=timeout_s,
+            creationflags=CREATE_NO_WINDOW,
         )
         saida = (r.stdout + r.stderr).strip()
         if saida:
@@ -998,7 +989,8 @@ def _servico_parar(nome: str, log_fn=None, timeout_s: int = 30) -> bool:
     def log(m):
         if log_fn: log_fn(m)
     try:
-        subprocess.run(["net", "stop", nome], capture_output=True, timeout=timeout_s)
+        subprocess.run(["net", "stop", nome], capture_output=True, timeout=timeout_s,
+                       creationflags=CREATE_NO_WINDOW)
         for _ in range(20):
             time.sleep(1)
             if not _servico_rodando(nome):
@@ -1326,6 +1318,7 @@ def _remover_servico_interno(versao: str, log_fn=None) -> bool:
                 [sys.executable, wp, "remove"],
                 capture_output=True, text=True,
                 encoding="utf-8", errors="ignore", timeout=15,
+                creationflags=CREATE_NO_WINDOW,
             )
             saida = (r.stdout + r.stderr).strip()
             if saida:
@@ -1344,6 +1337,7 @@ def _remover_servico_interno(versao: str, log_fn=None) -> bool:
             capture_output=True, text=True,
             encoding="utf-8", errors="ignore", timeout=15,
             cwd=os.path.dirname(instsvc),
+            creationflags=CREATE_NO_WINDOW,
         )
         saida = (r.stdout + r.stderr).strip()
         if saida:
@@ -1355,7 +1349,8 @@ def _remover_servico_interno(versao: str, log_fn=None) -> bool:
 
     if not _servico_existe(nome):
         return True
-    r2 = subprocess.run(["sc", "delete", nome], capture_output=True, text=True, timeout=15)
+    r2 = subprocess.run(["sc", "delete", nome], capture_output=True, text=True, timeout=15,
+                        creationflags=CREATE_NO_WINDOW)
     if r2.returncode == 0:
         log(f"Servico '{nome}' removido.")
         time.sleep(1)
@@ -1474,17 +1469,14 @@ def _processo_rodando(versao: str) -> bool:
     if proc is not None and proc.poll() is None:
         return True
     fb_dir = FB_CONFIGS[versao]["dir"].lower()
-    for nome_exe in _SERVIDOR_CANDIDATOS:
+    # Usando psutil para detecção mais moderna e performática
+    for proc in psutil.process_iter(['name', 'exe']):
         try:
-            r = subprocess.run(
-                ["wmic", "process", "where", f"name='{nome_exe}'",
-                 "get", "ExecutablePath", "/FORMAT:CSV"],
-                capture_output=True, text=True, timeout=8
-            )
-            for linha in r.stdout.lower().splitlines():
-                if fb_dir in linha:
+            if proc.info['name'].lower() in _SERVIDOR_CANDIDATOS:
+                exe = proc.info['exe']
+                if exe and fb_dir in exe.lower():
                     return True
-        except Exception:
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
     return False
 
@@ -1502,16 +1494,15 @@ def _parar_processo(versao: str, log_fn=None):
         except Exception:
             pass
     if _processo_rodando(versao):
-        fb_dir = FB_CONFIGS[versao]["dir"].replace("\\", "\\\\")
-        for nome_exe in _SERVIDOR_CANDIDATOS:
+        fb_dir = FB_CONFIGS[versao]["dir"].lower()
+        for proc in psutil.process_iter(['name', 'exe']):
             try:
-                subprocess.run(
-                    ["wmic", "process", "where",
-                     f"ExecutablePath like '%{fb_dir}%' and name='{nome_exe}'",
-                     "delete"],
-                    capture_output=True, timeout=10
-                )
-            except Exception:
+                if proc.info['name'].lower() in _SERVIDOR_CANDIDATOS:
+                    exe = proc.info['exe']
+                    if exe and fb_dir in exe.lower():
+                        log(f"  Encerrando processo portable {proc.info['name']} (PID {proc.pid}) ...")
+                        proc.kill()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
         time.sleep(2)
         _processos[versao] = None
@@ -1591,6 +1582,7 @@ def ativar_fb(versao: str, log_fn=None) -> dict:
             cwd=os.path.dirname(servidor),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
+            creationflags=CREATE_NO_WINDOW,
         )
         _processos[versao] = proc
         for _ in range(10):
@@ -1867,20 +1859,34 @@ def instalar_fb4_portable(log_fn=None, progresso_fn=None) -> dict:
     return instalar_fb_portable("4", log_fn, progresso_fn)
 
 
-def _baixar_arquivo(url, destino, tamanho_aprox, progresso_fn=None):
-    req = urllib.request.Request(url, headers={"User-Agent": "FuturaSetup/4.3"})
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        total = int(resp.headers.get("Content-Length", tamanho_aprox))
-        baixado = 0
-        with open(destino, "wb") as f:
-            while True:
-                bloco = resp.read(65536)
-                if not bloco:
-                    break
-                f.write(bloco)
-                baixado += len(bloco)
-                if progresso_fn:
-                    progresso_fn(min(99, int(baixado / total * 100)))
+def _baixar_arquivo(url, destino, tamanho_aprox, progresso_fn=None, log_fn=None):
+    def log(m):
+        if log_fn: log_fn(m)
+
+    tentativas = 0
+    while tentativas < MAX_TENTATIVAS_DOWNLOAD:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "FuturaSetup/4.3"})
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                total = int(resp.headers.get("Content-Length", tamanho_aprox))
+                baixado = 0
+                with open(destino, "wb") as f:
+                    while True:
+                        bloco = resp.read(65536)
+                        if not bloco:
+                            break
+                        f.write(bloco)
+                        baixado += len(bloco)
+                        if progresso_fn:
+                            progresso_fn(min(99, int(baixado / total * 100)))
+            return # Sucesso
+        except Exception as e:
+            tentativas += 1
+            if log_fn:
+                log(f"    Download falhou (tentativa {tentativas}/{MAX_TENTATIVAS_DOWNLOAD}): {e}")
+            if tentativas >= MAX_TENTATIVAS_DOWNLOAD:
+                raise
+            time.sleep(2)
 
 
 def _configurar_firebird_conf(fb_dir, porta, versao):
@@ -1942,26 +1948,7 @@ def remover_fb4_portable(log_fn=None) -> dict: return remover_fb_portable("4", l
 # Configuração oficial FB4 — arquivos do repositório Futura
 # =============================================================================
 
-_FB4_REPO_ARQUIVOS = {
-    "firebird.conf": (
-        "https://repositorio.futurasistemas.com.br/download.php"
-        "?dirfisico=D:/Backup//repositorio//30%20-%20Firebird%204.0/Conf/firebird.conf"
-        "&caminho=https://repositorio.futurasistemas.com.br/repositorio/30%20-%20Firebird%204.0/Conf/firebird.conf"
-        "&filename=firebird.conf"
-    ),
-    "databases.conf": (
-        "https://repositorio.futurasistemas.com.br/download.php"
-        "?dirfisico=D:/Backup//repositorio//30%20-%20Firebird%204.0/Conf/databases.conf"
-        "&caminho=https://repositorio.futurasistemas.com.br/repositorio/30%20-%20Firebird%204.0/Conf/databases.conf"
-        "&filename=databases.conf"
-    ),
-    "Usuarios.sql": (
-        "https://repositorio.futurasistemas.com.br/download.php"
-        "?dirfisico=D:/Backup//repositorio//30%20-%20Firebird%204.0/Conf/Usuarios.sql"
-        "&caminho=https://repositorio.futurasistemas.com.br/repositorio/30%20-%20Firebird%204.0/Conf/Usuarios.sql"
-        "&filename=Usuarios.sql"
-    ),
-}
+_FB4_REPO_ARQUIVOS = FB4_REPO_ARQUIVOS
 
 
 def aplicar_configs_oficiais_fb4(
@@ -2063,6 +2050,7 @@ def gfix_fb(path, versao="4", user="SYSDBA", password="sbofutura") -> dict:
         proc = subprocess.run(
             [gfix, "-validate", "-full", "-user", user, "-password", password, path],
             capture_output=True, timeout=120, text=True, encoding="utf-8", errors="ignore",
+            creationflags=CREATE_NO_WINDOW,
         )
         saida = (proc.stdout + proc.stderr).strip()
         resultado["executado"] = True
