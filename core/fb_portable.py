@@ -536,7 +536,7 @@ def _obter_security3_fdb_via_instalador(log_fn=None) -> bool:
                 log(f"    Falha no download (tentativa {tentativas}/{MAX_TENTATIVAS_DOWNLOAD}): {e}")
                 if tentativas < MAX_TENTATIVAS_DOWNLOAD:
                     time.sleep(2)
-        
+
         if not sucesso:
             log("  [FB3] Falha definitiva no download do instalador.")
             return False
@@ -1306,9 +1306,16 @@ def _remover_servico_interno(versao: str, log_fn=None) -> bool:
     def log(m):
         if log_fn: log_fn(m)
 
+    # ✅ Sem admin não é possível interagir com serviços Windows —
+    #    retorna False silenciosamente para não gerar WinError 740.
+    if not is_admin():
+        log(f"AVISO: sem permissao de administrador — nao foi possivel remover o servico FB{versao}.")
+        return False
+
     nome = FB_CONFIGS[versao]["servico_nome"]
     if _servico_rodando(nome):
-        subprocess.run(["net", "stop", nome], capture_output=True, timeout=30)
+        subprocess.run(["net", "stop", nome], capture_output=True, timeout=30,
+                       creationflags=CREATE_NO_WINDOW)
         time.sleep(2)
 
     wp = _wrapper_path(versao)
@@ -1350,6 +1357,7 @@ def _remover_servico_interno(versao: str, log_fn=None) -> bool:
 
     if not _servico_existe(nome):
         return True
+
     r2 = subprocess.run(["sc", "delete", nome], capture_output=True, text=True, timeout=15,
                         creationflags=CREATE_NO_WINDOW)
     if r2.returncode == 0:
@@ -1477,7 +1485,6 @@ def _processo_rodando(versao: str) -> bool:
     if proc is not None and proc.poll() is None:
         return True
     fb_dir = FB_CONFIGS[versao]["dir"].lower()
-    # Usando psutil para detecção mais moderna e performática
     for proc in psutil.process_iter(['name', 'exe']):
         try:
             if proc.info['name'].lower() in _SERVIDOR_CANDIDATOS:
@@ -1891,7 +1898,7 @@ def _baixar_arquivo(url, destino, tamanho_aprox, progresso_fn=None, log_fn=None)
                         baixado += len(bloco)
                         if progresso_fn:
                             progresso_fn(min(99, int(baixado / total * 100)))
-            return # Sucesso
+            return  # Sucesso
         except Exception as e:
             tentativas += 1
             if log_fn:
@@ -1931,14 +1938,26 @@ def remover_fb_portable(versao: str = "4", log_fn=None) -> dict:
     cfg = FB_CONFIGS.get(versao)
     if not cfg:
         return {"ok": False, "erro": f"Versao invalida: {versao}."}
+
     def log(m):
         if log_fn: log_fn(m)
+
     fb_dir  = cfg["dir"]
     label_v = cfg["label"]
+
+    # ✅ Só tenta remover o serviço se tiver permissão de admin.
+    #    Sem admin, _remover_servico_interno lançaria WinError 740.
     if fb_servico_existe(versao):
-        log(f"Removendo servico Windows do FB{versao} ...")
-        _remover_servico_interno(versao, log_fn)
+        if is_admin():
+            log(f"Removendo servico Windows do FB{versao} ...")
+            _remover_servico_interno(versao, log_fn)
+        else:
+            log(f"AVISO: servico Windows detectado mas sem permissao de admin para remover.")
+            log(f"  O servico '{cfg['servico_nome']}' permanecera registrado.")
+            log(f"  Reinicie como Administrador para removê-lo completamente.")
+
     inativar_fb(versao, log_fn)
+
     result = {"ok": False, "erro": ""}
     try:
         if not os.path.isdir(fb_dir):
@@ -1951,6 +1970,7 @@ def remover_fb_portable(versao: str = "4", log_fn=None) -> dict:
     except Exception as e:
         result["erro"] = str(e)
     return result
+
 
 def remover_fb3_portable(log_fn=None) -> dict: return remover_fb_portable("3", log_fn)
 def remover_fb4_portable(log_fn=None) -> dict: return remover_fb_portable("4", log_fn)
@@ -2007,7 +2027,7 @@ def aplicar_configs_oficiais_fb4(
             log(f"  ERRO: {result['erro']}")
             return result
 
-    # ── Porta 3050 já é o padrão oficial — nenhuma correção necessária ──────────
+    # ── Porta 3050 já é o padrão oficial — nenhuma correção necessária ───
     conf_path = os.path.join(fb_dir, "firebird.conf")
     try:
         with open(conf_path, "r", encoding="utf-8", errors="ignore") as f:
@@ -2190,7 +2210,7 @@ def atualizar_databases_conf(
     def log(m):
         if log_fn: log_fn(m)
 
-    fb_dir   = FB_CONFIGS[versao]["dir"]
+    fb_dir    = FB_CONFIGS[versao]["dir"]
     conf_path = os.path.join(fb_dir, "databases.conf")
 
     pasta_dados  = os.path.dirname(caminho_dados)
@@ -2218,8 +2238,8 @@ def atualizar_databases_conf(
 
         if marcador in conteudo:
             # Substitui apenas o bloco Live Databases, preservando tudo antes
-            idx       = conteudo.index(marcador)
-            cabecalho = conteudo[:idx]
+            idx            = conteudo.index(marcador)
+            cabecalho      = conteudo[:idx]
             conteudo_final = cabecalho + bloco_live
         else:
             # Marcador não existe — preserva conteúdo original e adiciona ao final
@@ -2271,7 +2291,7 @@ def reiniciar_fb(versao: str, log_fn=None) -> dict:
         time.sleep(1)
 
     st = status_detalhado()
-    d = st[f"fb{versao}"]
+    d  = st[f"fb{versao}"]
 
     if d["modo"] == "servico" and d["servico_reg"]:
         log("Modo: Servico Windows")

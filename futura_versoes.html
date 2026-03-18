@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Futura ERP — Tabela de Versões</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Syne:wght@400;600;700;800&display=swap');
+
+  :root {
+    --bg: #0a0e1a;
+    --surface: #111827;
+    --surface2: #1a2235;
+    --border: #1e2d45;
+    --accent: #00c2ff;
+    --accent2: #0066ff;
+    --green: #00e5a0;
+    --yellow: #ffd166;
+    --text: #e2e8f0;
+    --muted: #64748b;
+    --real: #00e5a0;
+    --estimado: #64748b;
+    --confirmado: #00c2ff;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    min-height: 100vh;
+    padding: 2rem;
+  }
+
+  /* Background grid */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,194,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,194,255,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .container {
+    max-width: 960px;
+    margin: 0 auto;
+    position: relative;
+    z-index: 1;
+  }
+
+  header {
+    margin-bottom: 2.5rem;
+  }
+
+  .badge {
+    display: inline-block;
+    background: rgba(0,194,255,0.1);
+    border: 1px solid rgba(0,194,255,0.3);
+    color: var(--accent);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    padding: 0.25rem 0.75rem;
+    border-radius: 2px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 1rem;
+  }
+
+  h1 {
+    font-size: 2.2rem;
+    font-weight: 800;
+    line-height: 1.1;
+    color: #fff;
+  }
+
+  h1 span {
+    color: var(--accent);
+  }
+
+  .subtitle {
+    color: var(--muted);
+    font-size: 0.95rem;
+    margin-top: 0.5rem;
+    font-weight: 400;
+  }
+
+  /* Buscador */
+  .search-wrapper {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .search-box {
+    display: flex;
+    align-items: center;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0 1rem;
+    flex: 1;
+    min-width: 200px;
+    transition: border-color 0.2s;
+  }
+
+  .search-box:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(0,194,255,0.1);
+  }
+
+  .search-box span {
+    color: var(--accent);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.9rem;
+    margin-right: 0.5rem;
+    user-select: none;
+  }
+
+  .search-box input {
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 1rem;
+    padding: 0.75rem 0;
+    width: 100%;
+    letter-spacing: 0.05em;
+  }
+
+  .search-box input::placeholder { color: var(--muted); }
+
+  .result-badge {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.75rem 1.25rem;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    color: var(--muted);
+    display: none;
+    white-space: nowrap;
+  }
+
+  .result-badge.visible { display: block; }
+  .result-badge .versao-match { color: var(--accent); font-weight: 700; font-size: 1rem; }
+
+  /* Filtros */
+  .filters {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+  }
+
+  .filter-btn {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-family: 'Syne', sans-serif;
+    font-size: 0.8rem;
+    font-weight: 600;
+    padding: 0.4rem 1rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .filter-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .filter-btn.active { background: rgba(0,194,255,0.1); border-color: var(--accent); color: var(--accent); }
+
+  /* Tabela */
+  .table-wrapper {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  thead {
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+  }
+
+  th {
+    padding: 0.75rem 1.25rem;
+    text-align: left;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+  }
+
+  td {
+    padding: 0.65rem 1.25rem;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    border-bottom: 1px solid rgba(30,45,69,0.5);
+  }
+
+  tr:last-child td { border-bottom: none; }
+
+  tr:hover td { background: rgba(0,194,255,0.03); }
+
+  tr.highlight td {
+    background: rgba(0,194,255,0.07) !important;
+    border-bottom-color: rgba(0,194,255,0.2);
+  }
+
+  tr.highlight td:first-child {
+    border-left: 3px solid var(--accent);
+  }
+
+  .build-cell { color: var(--text); font-weight: 600; }
+  .prefix-cell { color: var(--muted); }
+  .versao-cell { color: var(--yellow); font-weight: 600; }
+
+  .status-pill {
+    display: inline-block;
+    font-size: 0.65rem;
+    font-weight: 700;
+    padding: 0.15rem 0.55rem;
+    border-radius: 2px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-family: 'Syne', sans-serif;
+  }
+
+  .status-real { background: rgba(0,229,160,0.1); color: var(--real); border: 1px solid rgba(0,229,160,0.2); }
+  .status-confirmado { background: rgba(0,194,255,0.1); color: var(--confirmado); border: 1px solid rgba(0,194,255,0.2); }
+  .status-estimado { background: rgba(100,116,139,0.1); color: var(--estimado); border: 1px solid rgba(100,116,139,0.2); }
+
+  .legend {
+    display: flex;
+    gap: 1.5rem;
+    margin-top: 1rem;
+    flex-wrap: wrap;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+
+  .count-info {
+    color: var(--muted);
+    font-size: 0.8rem;
+    font-family: 'JetBrains Mono', monospace;
+    margin-bottom: 1rem;
+  }
+
+  .count-info span { color: var(--accent); }
+
+  /* Empty state */
+  .empty-state {
+    text-align: center;
+    padding: 3rem;
+    color: var(--muted);
+    display: none;
+  }
+  .empty-state.visible { display: block; }
+  .empty-state .icon { font-size: 2rem; margin-bottom: 0.5rem; }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <div class="badge">🗄 Futura ERP · Referência de Builds</div>
+    <h1>Tabela de <span>Versões</span></h1>
+    <p class="subtitle">Consulte a versão do sistema a partir do BUILD_BD da tabela PARAMETROS</p>
+  </header>
+
+  <div class="search-wrapper">
+    <div class="search-box">
+      <span>BUILD_BD &gt;</span>
+      <input type="number" id="searchInput" placeholder="ex: 114035" oninput="searchBuild(this.value)">
+    </div>
+    <div class="result-badge" id="resultBadge"></div>
+  </div>
+
+  <div class="filters">
+    <button class="filter-btn active" onclick="filterTable('all', this)">Todos</button>
+    <button class="filter-btn" onclick="filterTable('real', this)">Confirmados</button>
+    <button class="filter-btn" onclick="filterTable('estimado', this)">Estimados</button>
+    <button class="filter-btn" onclick="filterTable('2026', this)">2026</button>
+    <button class="filter-btn" onclick="filterTable('2025', this)">2025</button>
+    <button class="filter-btn" onclick="filterTable('2024', this)">2024</button>
+    <button class="filter-btn" onclick="filterTable('2023', this)">2023</button>
+    <button class="filter-btn" onclick="filterTable('2022', this)">2022</button>
+    <button class="filter-btn" onclick="filterTable('2027', this)">2027</button>
+    <button class="filter-btn" onclick="filterTable('2028', this)">2028</button>
+    <button class="filter-btn" onclick="filterTable('2029', this)">2029</button>
+    <button class="filter-btn" onclick="filterTable('2030', this)">2030</button>
+    <button class="filter-btn" onclick="filterTable('2031', this)">2031</button>
+    <button class="filter-btn" onclick="filterTable('2032', this)">2032</button>
+    <button class="filter-btn" onclick="filterTable('2033', this)">2033</button>
+    <button class="filter-btn" onclick="filterTable('2034', this)">2034</button>
+    <button class="filter-btn" onclick="filterTable('2035', this)">2035</button>
+    <button class="filter-btn" onclick="filterTable('2036', this)">2036</button>
+  </div>
+
+  <div class="count-info">Exibindo <span id="countVisible">0</span> registros</div>
+
+  <div class="table-wrapper">
+    <table id="mainTable">
+      <thead>
+        <tr>
+          <th>Prefixo</th>
+          <th>BUILD_BD (referência)</th>
+          <th>Versão</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+    <div class="empty-state" id="emptyState">
+      <div class="icon">🔍</div>
+      <div>Nenhum resultado encontrado</div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <div class="legend-item"><span class="status-pill status-real">Real</span> Dado histórico confirmado</div>
+    <div class="legend-item"><span class="status-pill status-confirmado">Confirmado</span> Verificado em banco real</div>
+    <div class="legend-item"><span class="status-pill status-estimado">Estimado</span> Calculado (~42 dias/release)</div>
+  </div>
+</div>
+
+<script>
+const data = [
+  [5, "5709", "2015.12.02", "real"],
+  [5, "5832", "2016.02.15", "real"],
+  [6, "6096", "2016.03.14", "real"],
+  [7, "7282", "2016.04.11", "real"],
+  [8, "8018", "2016.05.09", "real"],
+  [9, "9139", "2016.06.06", "real"],
+  [9, "9176", "2016.07.04", "real"],
+  [10, "10055", "2016.08.01", "real"],
+  [11, "11064", "2016.08.29", "real"],
+  [12, "12202", "2016.09.26", "real"],
+  [13, "13039", "2016.10.24", "real"],
+  [14, "14061", "2016.11.21", "real"],
+  [15, "15057", "2017.01.16", "real"],
+  [16, "16081", "2017.02.13", "real"],
+  [17, "17017", "2017.03.13", "real"],
+  [18, "18071", "2017.04.10", "real"],
+  [19, "19053", "2017.05.08", "real"],
+  [20, "20383", "2017.06.05", "real"],
+  [21, "21040", "2017.07.03", "real"],
+  [22, "22092", "2017.07.31", "real"],
+  [23, "23049", "2017.08.28", "real"],
+  [25, "25039", "2017.09.25", "real"],
+  [26, "26062", "2017.10.23", "real"],
+  [27, "27102", "2017.11.20", "real"],
+  [28, "28127", "2018.01.29", "real"],
+  [29, "29101", "2018.02.26", "real"],
+  [31, "31666", "2018.03.26", "real"],
+  [32, "32071", "2018.04.23", "real"],
+  [33, "33114", "2018.05.21", "real"],
+  [34, "34087", "2018.06.18", "real"],
+  [35, "35075", "2018.07.16", "real"],
+  [36, "36055", "2018.08.13", "real"],
+  [37, "37032", "2018.09.10", "real"],
+  [38, "38068", "2018.10.08", "real"],
+  [39, "39096", "2018.11.05", "real"],
+  [40, "40075", "2018.12.03", "real"],
+  [41, "41061", "2019.01.28", "real"],
+  [42, "42117", "2019.02.25", "real"],
+  [43, "43059", "2019.03.25", "real"],
+  [44, "44058", "2019.04.22", "real"],
+  [45, "45054", "2019.05.20", "real"],
+  [46, "46047", "2019.06.17", "real"],
+  [47, "47082", "2019.07.15", "real"],
+  [48, "48085", "2019.08.12", "real"],
+  [49, "49102", "2019.09.09", "real"],
+  [50, "50064", "2019.10.07", "real"],
+  [51, "51084", "2019.11.04", "real"],
+  [52, "52050", "2019.12.02", "real"],
+  [53, "53087", "2020.01.27", "real"],
+  [59, "59050", "2020.02.24", "real"],
+  [61, "61047", "2020.04.20", "real"],
+  [62, "62006", "2020.05.18", "real"],
+  [63, "63044", "2020.06.15", "real"],
+  [64, "64044", "2020.07.13", "real"],
+  [65, "65xxx", "2020.08.01", "real"],
+  [66, "66xxx", "2020.09.01", "real"],
+  [67, "67xxx", "2020.10.01", "real"],
+  [68, "68xxx", "2020.11.02", "real"],
+  [69, "69xxx", "2020.11.30", "real"],
+  [70, "70xxx", "2021.02.01", "real"],
+  [71, "71xxx", "2021.03.01", "real"],
+  [72, "72xxx", "2021.03.29", "real"],
+  [73, "73xxx", "2021.04.26", "real"],
+  [74, "74xxx", "2021.06.07", "estimado"],
+  [75, "75xxx", "2021.07.20", "estimado"],
+  [76, "76xxx", "2021.09.01", "estimado"],
+  [77, "77xxx", "2021.10.13", "estimado"],
+  [78, "78xxx", "2021.11.25", "estimado"],
+  [79, "79xxx", "2022.01.07", "estimado"],
+  [80, "80xxx", "2022.02.18", "estimado"],
+  [81, "81xxx", "2022.04.02", "estimado"],
+  [82, "82xxx", "2022.05.15", "estimado"],
+  [83, "83xxx", "2022.06.26", "estimado"],
+  [84, "84xxx", "2022.08.08", "estimado"],
+  [85, "85xxx", "2022.09.20", "estimado"],
+  [86, "86xxx", "2022.11.01", "estimado"],
+  [87, "87xxx", "2022.12.14", "estimado"],
+  [88, "88xxx", "2023.01.26", "estimado"],
+  [89, "89xxx", "2023.03.09", "estimado"],
+  [90, "90xxx", "2023.04.21", "estimado"],
+  [91, "91xxx", "2023.06.03", "estimado"],
+  [92, "92xxx", "2023.07.15", "estimado"],
+  [93, "93xxx", "2023.08.27", "estimado"],
+  [94, "94xxx", "2023.10.09", "estimado"],
+  [95, "95xxx", "2023.11.21", "estimado"],
+  [96, "96xxx", "2024.01.02", "estimado"],
+  [97, "97xxx", "2024.02.14", "estimado"],
+  [98, "98xxx", "2024.03.28", "estimado"],
+  [99, "99xxx", "2024.05.09", "estimado"],
+  [100, "100xxx", "2024.06.21", "estimado"],
+  [101, "101xxx", "2024.08.03", "estimado"],
+  [102, "102xxx", "2024.09.14", "estimado"],
+  [103, "103xxx", "2024.10.27", "estimado"],
+  [104, "104xxx", "2024.12.09", "estimado"],
+  [105, "105xxx", "2025.01.20", "estimado"],
+  [106, "106xxx", "2025.03.04", "estimado"],
+  [107, "107xxx", "2025.04.16", "estimado"],
+  [108, "108xxx", "2025.05.28", "estimado"],
+  [109, "109xxx", "2025.07.10", "estimado"],
+  [110, "110xxx", "2025.08.22", "estimado"],
+  [111, "111xxx", "2025.10.03", "estimado"],
+  [112, "112xxx", "2025.11.15", "estimado"],
+  [113, "113xxx", "2025.12.28", "estimado"],
+  [114, "114xxx", "2026.02.09", "confirmado"],
+  [115, "115xxx", "2026.03.23", "estimado"],
+  [116, "116xxx", "2026.05.05", "estimado"],
+  [117, "117xxx", "2026.06.17", "estimado"],
+  [118, "118xxx", "2026.07.29", "estimado"],
+  [119, "119xxx", "2026.09.10", "estimado"],
+  [120, "120xxx", "2026.10.23", "estimado"],
+  [121, "121xxx", "2026.12.04", "estimado"],
+  [122, "122xxx", "2027.01.16", "estimado"],
+  [123, "123xxx", "2027.02.27", "estimado"],
+  [124, "124xxx", "2027.04.11", "estimado"],
+  [125, "125xxx", "2027.05.24", "estimado"],
+  [126, "126xxx", "2027.07.05", "estimado"],
+  [127, "127xxx", "2027.08.17", "estimado"],
+  [128, "128xxx", "2027.09.29", "estimado"],
+  [129, "129xxx", "2027.11.10", "estimado"],
+  [130, "130xxx", "2027.12.23", "estimado"],
+  [131, "131xxx", "2028.02.04", "estimado"],
+  [132, "132xxx", "2028.03.18", "estimado"],
+  [133, "133xxx", "2028.04.29", "estimado"],
+  [134, "134xxx", "2028.06.11", "estimado"],
+  [135, "135xxx", "2028.07.23", "estimado"],
+  [136, "136xxx", "2028.09.04", "estimado"],
+  [137, "137xxx", "2028.10.17", "estimado"],
+  [138, "138xxx", "2028.11.28", "estimado"],
+  [139, "139xxx", "2029.01.10", "estimado"],
+  [140, "140xxx", "2029.02.21", "estimado"],
+  [141, "141xxx", "2029.04.05", "estimado"],
+  [142, "142xxx", "2029.05.17", "estimado"],
+  [143, "143xxx", "2029.06.29", "estimado"],
+  [144, "144xxx", "2029.08.10", "estimado"],
+  [145, "145xxx", "2029.09.22", "estimado"],
+  [146, "146xxx", "2029.11.04", "estimado"],
+  [147, "147xxx", "2029.12.16", "estimado"],
+  [148, "148xxx", "2030.01.28", "estimado"],
+  [149, "149xxx", "2030.03.11", "estimado"],
+  [150, "150xxx", "2030.04.23", "estimado"],
+  [151, "151xxx", "2030.06.04", "estimado"],
+  [152, "152xxx", "2030.07.17", "estimado"],
+  [153, "153xxx", "2030.08.28", "estimado"],
+  [154, "154xxx", "2030.10.10", "estimado"],
+  [155, "155xxx", "2030.11.22", "estimado"],
+  [156, "156xxx", "2031.01.03", "estimado"],
+  [157, "157xxx", "2031.02.15", "estimado"],
+  [158, "158xxx", "2031.03.29", "estimado"],
+  [159, "159xxx", "2031.05.10", "estimado"],
+  [160, "160xxx", "2031.06.22", "estimado"],
+  [161, "161xxx", "2031.08.04", "estimado"],
+  [162, "162xxx", "2031.09.15", "estimado"],
+  [163, "163xxx", "2031.10.28", "estimado"],
+  [164, "164xxx", "2031.12.09", "estimado"],
+  [165, "165xxx", "2032.01.21", "estimado"],
+  [166, "166xxx", "2032.03.03", "estimado"],
+  [167, "167xxx", "2032.04.15", "estimado"],
+  [168, "168xxx", "2032.05.27", "estimado"],
+  [169, "169xxx", "2032.07.09", "estimado"],
+  [170, "170xxx", "2032.08.20", "estimado"],
+  [171, "171xxx", "2032.10.02", "estimado"],
+  [172, "172xxx", "2032.11.13", "estimado"],
+  [173, "173xxx", "2032.12.26", "estimado"],
+  [174, "174xxx", "2033.02.06", "estimado"],
+  [175, "175xxx", "2033.03.21", "estimado"],
+  [176, "176xxx", "2033.05.02", "estimado"],
+  [177, "177xxx", "2033.06.14", "estimado"],
+  [178, "178xxx", "2033.07.26", "estimado"],
+  [179, "179xxx", "2033.09.07", "estimado"],
+  [180, "180xxx", "2033.10.19", "estimado"],
+  [181, "181xxx", "2033.12.01", "estimado"],
+  [182, "182xxx", "2034.01.12", "estimado"],
+  [183, "183xxx", "2034.02.24", "estimado"],
+  [184, "184xxx", "2034.04.07", "estimado"],
+  [185, "185xxx", "2034.05.20", "estimado"],
+  [186, "186xxx", "2034.07.01", "estimado"],
+  [187, "187xxx", "2034.08.13", "estimado"],
+  [188, "188xxx", "2034.09.24", "estimado"],
+  [189, "189xxx", "2034.11.06", "estimado"],
+  [190, "190xxx", "2034.12.19", "estimado"],
+  [191, "191xxx", "2035.01.30", "estimado"],
+  [192, "192xxx", "2035.03.14", "estimado"],
+  [193, "193xxx", "2035.04.25", "estimado"],
+  [194, "194xxx", "2035.06.07", "estimado"],
+  [195, "195xxx", "2035.07.19", "estimado"],
+  [196, "196xxx", "2035.08.31", "estimado"],
+  [197, "197xxx", "2035.10.13", "estimado"],
+  [198, "198xxx", "2035.11.24", "estimado"],
+  [199, "199xxx", "2036.01.06", "estimado"],
+  [200, "200xxx", "2036.02.17", "estimado"],
+  [201, "201xxx", "2036.04.01", "estimado"],
+  [202, "202xxx", "2036.05.13", "estimado"],
+  [203, "203xxx", "2036.07.04", "estimado"],
+  [204, "204xxx", "2036.08.16", "estimado"],
+  [205, "205xxx", "2036.09.28", "estimado"],
+  [206, "206xxx", "2036.11.09", "estimado"],
+  [207, "207xxx", "2036.12.22", "estimado"],
+];
+
+let currentFilter = 'all';
+
+function renderTable(filter = 'all', highlight = null) {
+  const tbody = document.getElementById('tableBody');
+  tbody.innerHTML = '';
+  let count = 0;
+
+  const seen = new Set();
+  for (const [prefix, build, versao, status] of data) {
+    const key = `${prefix}-${versao}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    let show = true;
+    if (filter === 'real') show = status === 'real' || status === 'confirmado';
+    else if (filter === 'estimado') show = status === 'estimado';
+    else if (['2026','2025','2024','2023','2022','2021','2020','2019','2018','2017','2016','2015'].includes(filter)) {
+      show = versao.startsWith(filter);
+    }
+    if (!show) continue;
+
+    count++;
+    const tr = document.createElement('tr');
+    const isHighlight = highlight === prefix;
+    if (isHighlight) tr.classList.add('highlight');
+
+    const statusLabel = status === 'confirmado' ? 'Confirmado' : status === 'real' ? 'Real' : 'Estimado';
+    tr.innerHTML = `
+      <td class="prefix-cell">${prefix}</td>
+      <td class="build-cell">${build}</td>
+      <td class="versao-cell">${versao}</td>
+      <td><span class="status-pill status-${status}">${statusLabel}</span></td>
+    `;
+    tbody.appendChild(tr);
+  }
+
+  document.getElementById('countVisible').textContent = count;
+  document.getElementById('emptyState').classList.toggle('visible', count === 0);
+
+  if (highlight) {
+    setTimeout(() => {
+      const row = tbody.querySelector('tr.highlight');
+      if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 100);
+  }
+}
+
+function searchBuild(value) {
+  const badge = document.getElementById('resultBadge');
+  if (!value) {
+    badge.classList.remove('visible');
+    renderTable(currentFilter, null);
+    return;
+  }
+
+  const num = parseInt(value);
+  if (isNaN(num)) { badge.classList.remove('visible'); return; }
+
+  const s = String(num);
+  const prefix = s.length >= 3 ? parseInt(s.slice(0, 3)) : s.length === 2 ? parseInt(s) : parseInt(s);
+  
+  // Find matching entry
+  let match = null;
+  for (const [p, build, versao, status] of data) {
+    if (p === prefix) { match = { prefix: p, build, versao, status }; break; }
+  }
+
+  if (match) {
+    badge.classList.add('visible');
+    badge.innerHTML = `BUILD <b>${num}</b> → versão <span class="versao-match">${match.versao}</span>`;
+    currentFilter = 'all';
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.filter-btn')[0].classList.add('active');
+    renderTable('all', match.prefix);
+  } else {
+    badge.classList.add('visible');
+    badge.innerHTML = `BUILD <b>${num}</b> → <span style="color:#f87171">prefixo ${prefix} não encontrado</span>`;
+    renderTable('all', null);
+  }
+}
+
+function filterTable(filter, btn) {
+  currentFilter = filter;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('searchInput').value = '';
+  document.getElementById('resultBadge').classList.remove('visible');
+  renderTable(filter, null);
+}
+
+renderTable('all');
+</script>
+</body>
+</html>

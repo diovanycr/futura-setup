@@ -576,7 +576,6 @@ class _StatusCard(QFrame):
     def atualizar(self, instalado: bool, ver_str: str, fb_dir: str, label_v: str):
         self._data = (instalado, ver_str, fb_dir, label_v)
         cor = COLORS.get("accent2", "#2ecc71") if instalado else COLORS.get("text_dim", "#888")
-        # self._dot.setStyleSheet(f"background:{cor}; border-radius:5px;") # Removido ponto
         self._icon.setText("✅" if instalado else "❌")
         if instalado:
             self._lbl_status.setText(f"{label_v} instalado")
@@ -864,15 +863,11 @@ class _DatabasesConfCard(QFrame):
 
 
     def set_version(self, versao: str):
+        """Seleciona o radio button correspondente à versão informada ('3' ou '4')."""
         if versao == "3":
             self._radio_fb3.setChecked(True)
         elif versao == "4":
             self._radio_fb4.setChecked(True)
-
-
-
-    # -- Varredura --------------------------------------------------------
-
 
 
     # -- Varredura --------------------------------------------------------
@@ -1137,6 +1132,233 @@ class _DatabasesConfCard(QFrame):
 # Card de Instalação Automática
 # =============================================================================
 
+class _InstallRemoveCard(QFrame):
+    """
+    Card da aba 'Instalar / Remover' — visual idêntico ao _AutoInstallCard.
+    Dois botões: INSTALAR (primário) e REMOVER (danger).
+    Enquanto um está ativo, o outro fica desabilitado.
+    """
+    instalar_solicitado = pyqtSignal(str)   # (versao)
+    remover_solicitado  = pyqtSignal(str)   # (versao)
+
+    def __init__(self, versao: str, parent=None):
+        super().__init__(parent)
+        self._versao    = versao
+        self._instalado = False
+        self.setObjectName(f"install_remove_card_{versao}")
+        self._build_ui()
+        self._upd_style()
+        theme_manager.theme_changed.connect(lambda _: self._upd_style())
+
+    def _build_ui(self):
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(18, 18, 18, 18)
+        lay.setSpacing(12)
+
+        # ── Header ────────────────────────────────────────────────────────
+        header = QHBoxLayout()
+        titulo = QLabel(f"Firebird {self._versao}")
+        titulo.setFont(QFont(FONT_SANS, 12, QFont.Weight.Bold))
+        titulo.setStyleSheet(f"color:{_COR[self._versao]};")
+
+        icon = QLabel("📦")
+        icon.setFont(QFont(FONT_SANS, 14))
+
+        self._lbl_badge = QLabel("NÃO INSTALADO")
+        self._lbl_badge.setFont(QFont(FONT_SANS, 8, QFont.Weight.Bold))
+        self._lbl_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._lbl_badge.setMinimumWidth(120)
+        self._lbl_badge.setContentsMargins(6, 2, 6, 2)
+
+        header.addWidget(titulo, 1)
+        header.addWidget(self._lbl_badge)
+        header.addWidget(icon)
+        lay.addLayout(header)
+
+        # ── Separador ─────────────────────────────────────────────────────
+        hl = QFrame()
+        hl.setFrameShape(QFrame.Shape.HLine)
+        hl.setStyleSheet(f"background:{COLORS.get('border','#444')}; max-height:1px;")
+        lay.addWidget(hl)
+
+        # ── Info ──────────────────────────────────────────────────────────
+        cfg = FB_CONFIGS[self._versao]
+        self._lbl_info = QLabel(
+            f"Diretório: {cfg['dir']}\n"
+            f"Porta: {cfg['porta']}"
+        )
+        self._lbl_info.setFont(QFont(FONT_MONO, 9))
+        self._lbl_info.setWordWrap(True)
+        self._lbl_info.setStyleSheet(
+            f"color:{COLORS.get('text_mid','#aaa')}; background:transparent; border:none;"
+        )
+        lay.addWidget(self._lbl_info)
+
+        # ── Versão instalada ───────────────────────────────────────────────
+        self._lbl_ver = QLabel("")
+        self._lbl_ver.setFont(QFont(FONT_MONO, 8))
+        self._lbl_ver.setStyleSheet(
+            f"color:{COLORS.get('accent2','#2ecc71')}; background:transparent; border:none;"
+        )
+        lay.addWidget(self._lbl_ver)
+
+        lay.addStretch()
+
+        # ── Barra de progresso (oculta por padrão) ─────────────────────────
+        self._status_box = QWidget()
+        self._status_box.setVisible(False)
+        st_lay = QVBoxLayout(self._status_box)
+        st_lay.setContentsMargins(0, 4, 0, 4)
+        st_lay.setSpacing(4)
+        self._lbl_status = label("Preparando...", COLORS["text_dim"], 8)
+        self._pbar = QProgressBar()
+        self._pbar.setFixedHeight(4)
+        self._pbar.setTextVisible(False)
+        self._pbar.setRange(0, 100)
+        st_lay.addWidget(self._lbl_status)
+        st_lay.addWidget(self._pbar)
+        lay.addWidget(self._status_box)
+
+        # ── Botões lado a lado ────────────────────────────────────────────
+        btn_lay = QHBoxLayout()
+        btn_lay.setSpacing(10)
+
+        self._btn_instalar = make_primary_btn("⬇  INSTALAR", 160)
+        self._btn_instalar.setFixedHeight(38)
+        self._btn_instalar.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_instalar.clicked.connect(
+            lambda: self.instalar_solicitado.emit(self._versao)
+        )
+
+        self._btn_remover = QPushButton("🗑  REMOVER")
+        self._btn_remover.setFixedHeight(38)
+        self._btn_remover.setMinimumWidth(130)
+        self._btn_remover.setFont(QFont(FONT_SANS, 10, QFont.Weight.Bold))
+        self._btn_remover.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_remover.clicked.connect(
+            lambda: self.remover_solicitado.emit(self._versao)
+        )
+
+        btn_lay.addWidget(self._btn_instalar, 1)
+        btn_lay.addWidget(self._btn_remover, 1)
+        lay.addLayout(btn_lay)
+
+        # Estado inicial
+        self._set_estado(False)
+
+    # ── API pública ───────────────────────────────────────────────────────
+
+    def set_instalado(self, instalado: bool, ver_str: str = ""):
+        self._instalado = instalado
+        self._lbl_ver.setText(f"Versão: {ver_str}" if ver_str else "")
+        self._set_estado(instalado)
+
+    def set_loading(self, active: bool, msg: str = "", progress: int = 0):
+        self._status_box.setVisible(active)
+        self._btn_instalar.setEnabled(not active)
+        self._btn_remover.setEnabled(not active)
+        if active:
+            if msg:
+                self._lbl_status.setText(msg)
+            self._pbar.setValue(progress)
+
+    # ── Internos ──────────────────────────────────────────────────────────
+
+    def _set_estado(self, instalado: bool):
+        acc  = _COR[self._versao]
+        brd  = COLORS.get("border", "#444")
+
+        # Badge
+        if instalado:
+            self._lbl_badge.setText("INSTALADO")
+            self._lbl_badge.setStyleSheet(f"""
+                QLabel {{
+                    background:{COLORS.get('accent2','#2ecc71')}; color:#fff;
+                    border-radius:4px; padding:2px 8px; font-weight:bold;
+                }}
+            """)
+        else:
+            self._lbl_badge.setText("NÃO INSTALADO")
+            self._lbl_badge.setStyleSheet(f"""
+                QLabel {{
+                    background:{COLORS.get('surface','#2a2a2a')};
+                    color:{COLORS.get('text_dim','#888')};
+                    border:1px solid {brd};
+                    border-radius:4px; padding:2px 8px; font-weight:bold;
+                }}
+            """)
+
+        # INSTALAR: habilitado quando NÃO instalado
+        self._btn_instalar.setEnabled(not instalado)
+        if not instalado:
+            self._btn_instalar.setStyleSheet(f"""
+                QPushButton {{
+                    background:{acc}; color:#fff; border:none;
+                    border-radius:6px; padding:6px 16px; font-weight:bold;
+                    font-size:10pt;
+                }}
+                QPushButton:hover {{ background:{acc}; opacity:0.85; }}
+                QPushButton:disabled {{
+                    background:{brd}; color:{COLORS.get('text_disabled','#666')};
+                    border-radius:6px;
+                }}
+            """)
+        else:
+            self._btn_instalar.setStyleSheet(f"""
+                QPushButton {{
+                    background:{brd}; color:{COLORS.get('text_disabled','#666')};
+                    border:none; border-radius:6px; padding:6px 16px;
+                    font-weight:bold; font-size:10pt;
+                }}
+            """)
+
+        # REMOVER: habilitado quando instalado
+        self._btn_remover.setEnabled(instalado)
+        if instalado:
+            self._btn_remover.setStyleSheet(f"""
+                QPushButton {{
+                    background:#c0392b; color:#fff; border:none;
+                    border-radius:6px; padding:6px 16px; font-weight:bold;
+                    font-size:10pt;
+                }}
+                QPushButton:hover {{ background:#e74c3c; }}
+                QPushButton:disabled {{
+                    background:{brd}; color:{COLORS.get('text_disabled','#666')};
+                    border-radius:6px;
+                }}
+            """)
+        else:
+            self._btn_remover.setStyleSheet(f"""
+                QPushButton {{
+                    background:{brd}; color:{COLORS.get('text_disabled','#666')};
+                    border:none; border-radius:6px; padding:6px 16px;
+                    font-weight:bold; font-size:10pt;
+                }}
+            """)
+
+    def _upd_style(self, _=""):
+        acc = _COR[self._versao]
+        bg  = COLORS.get("surface", "#1e1e1e")
+        brd = COLORS.get("border",  "#444")
+        self.setStyleSheet(f"""
+            QFrame#install_remove_card_{self._versao} {{
+                background:{bg};
+                border:1.5px solid {brd};
+                border-radius:12px;
+            }}
+            QFrame#install_remove_card_{self._versao}:hover {{
+                border:1.5px solid {acc};
+                background:{COLORS.get('surface2','#2a2a2a')};
+            }}
+        """)
+        self._pbar.setStyleSheet(f"""
+            QProgressBar {{ background:{brd}; border:none; border-radius:2px; }}
+            QProgressBar::chunk {{ background:{acc}; border-radius:2px; }}
+        """)
+        # Re-aplica o estado para atualizar cores dos botões com novo tema
+        self._set_estado(self._instalado)
+
+
 class _AutoInstallCard(QFrame):
     acao_solicitada = pyqtSignal(str) # (versao)
 
@@ -1193,7 +1415,7 @@ class _AutoInstallCard(QFrame):
 
         desc = label(desc_text.strip(), COLORS["text_mid"], 9)
         desc.setWordWrap(True)
-        desc.setStyleSheet(f"color:{COLORS["text_mid"]}; line-height: 1.4;")
+        desc.setStyleSheet(f"color:{COLORS['text_mid']}; line-height: 1.4;")
         lay.addWidget(desc)
 
         lay.addStretch()
@@ -1256,9 +1478,6 @@ class _AutoInstallCard(QFrame):
             QProgressBar {{ background: {brd}; border: none; border-radius: 2px; }}
             QProgressBar::chunk {{ background: {acc}; border-radius: 2px; }}
         """)
-
-
-# =============================================================================
 
 
 # =============================================================================
@@ -1497,6 +1716,8 @@ class PageFbPortable(QWidget):
         self._upd_toggle   = False
         self._toggle_rows  : dict[str, _ToggleRow]  = {}
         self._modo_cards   : dict[str, _ModoCard]   = {}
+        # ✅ Guarda a versão solicitada na instalação automática ("3" ou "4")
+        self._versao_auto_install: str = "4"
         self._build_ui()
         theme_manager.theme_changed.connect(self._upd_style)
 
@@ -1632,44 +1853,31 @@ class PageFbPortable(QWidget):
         # -- ABA 2: Instalar / Remover -------------------------------------
         tab_instalar = QWidget()
         ilay = QVBoxLayout(tab_instalar)
-        ilay.setContentsMargins(0, 16, 0, 0)
+        ilay.setContentsMargins(16, 16, 16, 16)
         ilay.setSpacing(10)
 
         nota = label(
-            "Selecione a versão e use os botões para instalar ou remover o portable.",
+            "Instale ou remova cada versão do Firebird Portable de forma independente.",
             COLORS["text_dim"], 9,
         )
         nota.setWordWrap(True)
         ilay.addWidget(nota)
 
-        self._radio_group = QButtonGroup(self)
-        radio_row = QHBoxLayout()
-        radio_row.setSpacing(20)
-        for ver, cfg in FB_CONFIGS.items():
-            rb = QRadioButton(cfg["label"])
-            rb.setFont(QFont(FONT_SANS, 11))
-            rb.setChecked(ver == "4")
-            rb.toggled.connect(
-                lambda checked, v=ver: self._on_versao_changed(v) if checked else None
-            )
-            self._radio_group.addButton(rb)
-            radio_row.addWidget(rb)
-        radio_row.addStretch()
-        ilay.addLayout(radio_row)
+        # Cards FB3 e FB4 lado a lado
+        ir_card_lay = QHBoxLayout()
+        ir_card_lay.setSpacing(16)
 
-        self._lbl_porta = label("", COLORS["text_dim"], 9)
-        ilay.addWidget(self._lbl_porta)
+        self._ir_cards: dict[str, _InstallRemoveCard] = {}
+        for v in ("3", "4"):
+            ir_card = _InstallRemoveCard(v)
+            ir_card.instalar_solicitado.connect(self._on_instalar)
+            ir_card.remover_solicitado.connect(self._on_remover)
+            self._ir_cards[v] = ir_card
+            ir_card_lay.addWidget(ir_card, 1)
 
-        self._card_status = _StatusCard()
-        ilay.addWidget(self._card_status)
+        ilay.addLayout(ir_card_lay)
 
-        self._btn_instalar = make_primary_btn("INSTALAR", 160)
-        self._btn_instalar.clicked.connect(self._on_instalar)
-        self._btn_remover  = make_secondary_btn("REMOVER", 100)
-        self._btn_remover.clicked.connect(self._on_remover)
-        btn_voltar = make_secondary_btn("VOLTAR", 80)
-        btn_voltar.clicked.connect(self.go_menu.emit)
-        ilay.addWidget(btn_row(self._btn_instalar, self._btn_remover, btn_voltar))
+        # Barra de progresso global
         self._progress = QProgressBar()
         self._progress.setRange(0, 100)
         self._progress.setValue(0)
@@ -1881,8 +2089,6 @@ class PageFbPortable(QWidget):
 
     def _on_dash_v_clicada(self, versao: str):
         """Clique no card do dashboard alterna a ativação."""
-        # Somente se o clique não for nos botões (já tratado pelos sinais individuais)
-        # Na verdade, o frame pai captura o clique. Se clicou no frame (espaço vazio), alterna.
         if self._worker: return
         row = self._toggle_rows.get(versao)
         if row and row.toggle.isEnabled():
@@ -1996,6 +2202,9 @@ class PageFbPortable(QWidget):
             self._alerta("Permissão de administrador necessária para instalação automática.", "warn")
             return
 
+        # ✅ Salva a versão solicitada ("3" ou "4") para uso no callback
+        self._versao_auto_install = versao
+
         card = self._auto_cards.get(versao)
         if card: card.set_loading(True, "Iniciando...", 0)
 
@@ -2016,45 +2225,48 @@ class PageFbPortable(QWidget):
         worker.start()
 
     def _on_auto_install_concluido(self, r: dict):
-        versao = r.get("versao", "3")
+        # ✅ Usa a versão salva ("3" ou "4"), não r["versao"] que contém
+        #    a string de versão do Firebird (ex: "4.0.3.2731")
+        versao = self._versao_auto_install
+
         card = self._auto_cards.get(versao)
         if card: card.set_loading(False)
 
         self._setar_ocupado(False)
 
         if r["ok"]:
-            versao = r.get("versao", "3")
             msg = (
                 f"Firebird {versao} instalado e iniciado com sucesso!\n"
                 "Agora, o sistema irá procurar seus bancos de dados para completar a configuração."
             )
             self._alerta(msg, "success")
             
-            # PASSO 4 e 5: Mudar para a aba de Banco de Dados e disparar a varredura
+            # ✅ Seleciona corretamente o radio button da versão instalada na aba Banco de Dados
             self._db_conf_card.set_version(versao)
-            self._tabs.setCurrentIndex(3) # Índice da aba "💾 Banco de Dados"
+            self._tabs.setCurrentIndex(3)  # Índice da aba "💾 Banco de Dados"
             
-            # Dá um pequeno delay para o usuário ver a troca de aba antes de começar a varredura
+            # Pequeno delay para o usuário perceber a troca de aba antes da varredura
             QTimer.singleShot(1000, self._db_conf_card._on_varrer)
         else:
             self._alerta(f"Falha na instalação automática: {r.get('erro', 'Erro desconhecido')}", "error")
 
     def _on_versao_changed(self, versao: str):
+        # Mantido para compatibilidade; a aba Instalar/Remover não usa mais radio
         self._versao_sel = versao
-        cfg = FB_CONFIGS[versao]
-        self._lbl_porta.setText(
-            f"Porta: {cfg['porta']}  |  Diretório: {cfg['dir']}"
-        )
         self._alert.setVisible(False)
         self._atualizar_card_status()
 
-    def _on_instalar(self):
-        versao = self._versao_sel
-        cfg    = FB_CONFIGS[versao]
+    def _on_instalar(self, versao: str):
+        cfg = FB_CONFIGS[versao]
 
         if fb_portable_instalado(versao):
             self._alerta(f"{cfg['label']} já está instalado em {cfg['dir']}.", "info")
             return
+
+        self._versao_sel = versao
+        ir = self._ir_cards.get(versao)
+        if ir:
+            ir.set_loading(True, "Iniciando instalação...", 0)
 
         self._setar_ocupado(True)
         self._console.limpar()
@@ -2071,22 +2283,31 @@ class PageFbPortable(QWidget):
         worker.start()
 
     def _on_instalado(self, r: dict):
+        versao = self._versao_sel
+        ir = self._ir_cards.get(versao)
+        if ir:
+            ir.set_loading(False)
+
         self._setar_ocupado(False)
         self._progress.setVisible(False)
         self._atualizar_status()
-        cfg = FB_CONFIGS[self._versao_sel]
+        cfg = FB_CONFIGS[versao]
         if r["ok"]:
             self._alerta(f"{cfg['label']} instalado! Versão: {r['versao']}", "success")
         else:
             self._alerta(f"Erro na instalação: {r['erro']}", "error")
 
-    def _on_remover(self):
-        versao = self._versao_sel
-        cfg    = FB_CONFIGS[versao]
+    def _on_remover(self, versao: str):
+        cfg = FB_CONFIGS[versao]
 
         if not fb_portable_instalado(versao):
             self._alerta(f"{cfg['label']} não está instalado.", "warn")
             return
+
+        self._versao_sel = versao
+        ir = self._ir_cards.get(versao)
+        if ir:
+            ir.set_loading(True, "Removendo...", 0)
 
         self._setar_ocupado(True)
         self._console.limpar()
@@ -2100,9 +2321,14 @@ class PageFbPortable(QWidget):
         worker.start()
 
     def _on_removido(self, r: dict):
+        versao = self._versao_sel
+        ir = self._ir_cards.get(versao)
+        if ir:
+            ir.set_loading(False)
+
         self._setar_ocupado(False)
         self._atualizar_status()
-        cfg = FB_CONFIGS[self._versao_sel]
+        cfg = FB_CONFIGS[versao]
         if r["ok"]:
             self._alerta(f"{cfg['label']} removido.", "success")
         else:
@@ -2117,24 +2343,19 @@ class PageFbPortable(QWidget):
     # =========================================================================
 
     def _setar_ocupado(self, v: bool):
-        self._btn_instalar.setEnabled(not v)
-        self._btn_remover.setEnabled(not v)
         for row in self._toggle_rows.values():
             row.toggle.setEnabled(not v)
         for card in self._modo_cards.values():
             card.set_ocupado(v)
-        for btn in self._radio_group.buttons():
-            btn.setEnabled(not v)
+        # Os ir_cards gerenciam o próprio estado via set_loading
 
     def _atualizar_card_status(self):
-        versao    = self._versao_sel
-        instalado = fb_portable_instalado(versao)
-        ver_str   = versao_fb_portable(versao) if instalado else ""
-        cfg       = FB_CONFIGS[versao]
-
-        self._card_status.atualizar(instalado, ver_str, cfg["dir"], cfg["label"])
-        self._btn_instalar.setEnabled(not instalado)
-        self._btn_remover.setEnabled(instalado)
+        for v in ("3", "4"):
+            instalado = fb_portable_instalado(v)
+            ver_str   = versao_fb_portable(v) if instalado else ""
+            ir = self._ir_cards.get(v)
+            if ir:
+                ir.set_instalado(instalado, ver_str)
 
     def _alerta(self, txt: str, kind: str):
         self._alert.set_text(txt)
@@ -2201,10 +2422,6 @@ class PageFbPortable(QWidget):
             """)
         except Exception:
             pass
-        for btn in self._radio_group.buttons():
-            btn.setStyleSheet(
-                f"color:{COLORS.get('text','#fff')}; background:transparent;"
-            )
 
     def reset(self):
         self._alert.setVisible(False)
