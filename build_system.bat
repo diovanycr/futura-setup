@@ -39,11 +39,12 @@ if errorlevel 1 (
 ) else (
     echo  [OK] Dependencias ja instaladas. Pulando.
 )
-:: Ler versao do config.py
+:: Auto-incrementar e ler versao do config.py
+python "%ROOT%bump_version.py"
 python -c "import config; print(config.APP_VERSION)" > "%TEMP%\futura_version.txt" 2>nul
 set /p VERSION=<"%TEMP%\futura_version.txt"
 if "%VERSION%"=="" set "VERSION=0.0.0"
-echo  [OK] Versao detectada: v%VERSION%
+echo  [OK] Nova versao configurada para: v%VERSION%
 
 :: Limpar build anterior (mantém .exe já compilados em dist\)
 echo  Limpando cache anterior...

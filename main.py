@@ -7,6 +7,15 @@ import os
 import platform
 import hashlib
 import time
+import subprocess
+
+if os.name == 'nt':
+    _original_popen = subprocess.Popen
+    def _patched_popen(*args, **kwargs):
+        if 'creationflags' not in kwargs:
+            kwargs['creationflags'] = 0x08000000  # CREATE_NO_WINDOW
+        return _original_popen(*args, **kwargs)
+    subprocess.Popen = _patched_popen  # type: ignore
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
@@ -948,4 +957,6 @@ def main():
 
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
     main()
