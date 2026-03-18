@@ -5,7 +5,7 @@
 
 # ── VERSÃO ────────────────────────────────────────────────────────────────────
 
-APP_VERSION = "4.3.2"
+APP_VERSION = "4.3.3"
 
 # Súpressão de janelas CMD em subprocessos Windows
 CREATE_NO_WINDOW = 0x08000000

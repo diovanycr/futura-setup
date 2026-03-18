@@ -1257,7 +1257,7 @@ def _registrar_fb3_via_wrapper(nome: str, label_v: str, servidor: str, log_fn=No
     if not wrapper_path:
         return {"ok": False, "erro": "Falha ao gerar wrapper pywin32."}
 
-    python_exe = sys.executable
+    python_exe = (getattr(sys, "frozen", False) and __import__("shutil").which("python")) or sys.executable
     log(f"  Python exe: {python_exe}")
     log(f"  Wrapper   : {wrapper_path}")
 
@@ -1313,9 +1313,10 @@ def _remover_servico_interno(versao: str, log_fn=None) -> bool:
 
     wp = _wrapper_path(versao)
     if versao == "3" and os.path.isfile(wp) and _pywin32_disponivel():
+        python_exe = (getattr(sys, "frozen", False) and __import__("shutil").which("python")) or sys.executable
         try:
             r = subprocess.run(
-                [sys.executable, wp, "remove"],
+                [python_exe, wp, "remove"],
                 capture_output=True, text=True,
                 encoding="utf-8", errors="ignore", timeout=15,
                 creationflags=CREATE_NO_WINDOW,

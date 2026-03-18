@@ -29,6 +29,7 @@ class Prefs:
         self._path = prefs_path
         self._data: dict = {
             "theme":           "light",
+            "ui_theme":        "modern",  # "modern" | "classic"
             "servidores_hist": [],
             "pastas_hist":     [],
             "portas_hist":     [],
@@ -52,6 +53,16 @@ class Prefs:
                         self._data["portas_hist"] = loaded["portas_hist"]
         except Exception:
             pass  # prefs corrompidas: usa defaults silenciosamente
+
+    @property
+    def ui_theme(self) -> str:
+        return self._data.get("ui_theme", "modern")
+
+    @ui_theme.setter
+    def ui_theme(self, value: str):
+        if value in ("modern", "classic"):
+            self._data["ui_theme"] = value
+            self.save()
 
     def save(self):
         try:

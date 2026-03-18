@@ -11,7 +11,8 @@ from ui.theme import set_theme, COLORS
 
 
 class ThemeManager(QObject):
-    theme_changed = pyqtSignal(str)   # emite o novo mode ("light" | "dark")
+    theme_changed    = pyqtSignal(str)   # emite o novo mode ("light" | "dark")
+    ui_theme_changed = pyqtSignal(str)   # emite o novo tema ("modern" | "classic")
     _instance = None
 
     def __new__(cls, *args, **kwargs):
@@ -25,7 +26,8 @@ class ThemeManager(QObject):
         if getattr(self, "_initialized", False):
             return
         self._initialized = True
-        self._mode = self._load_saved_theme()
+        self._mode        = self._load_saved_theme()
+        self._ui_theme    = self._load_saved_ui_theme()
         set_theme(self._mode)
 
     def _load_saved_theme(self) -> str:
@@ -35,9 +37,20 @@ class ThemeManager(QObject):
         except Exception:
             return "light"
 
+    def _load_saved_ui_theme(self) -> str:
+        try:
+            from core.logger import log
+            return log.prefs.ui_theme
+        except Exception:
+            return "modern"
+
     @property
     def mode(self) -> str:
         return self._mode
+
+    @property
+    def ui_theme(self) -> str:
+        return self._ui_theme
 
     def toggle(self):
         """Alterna entre light e dark."""
@@ -49,6 +62,17 @@ class ThemeManager(QObject):
         if mode not in ("light", "dark"):
             return
         self._apply(mode)
+
+    def set_ui_theme(self, ui_theme: str):
+        if ui_theme not in ("modern", "classic"):
+            return
+        self._ui_theme = ui_theme
+        try:
+            from core.logger import log
+            log.prefs.ui_theme = ui_theme
+        except Exception:
+            pass
+        self.ui_theme_changed.emit(ui_theme)
 
     def _apply(self, mode: str):
         self._mode = mode

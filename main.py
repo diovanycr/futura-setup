@@ -416,6 +416,50 @@ class ThemeToggleBtn(QWidget):
             theme_manager.toggle()
 
 
+class StyleToggleBtn(QWidget):
+    """Botão para alternar entre UI Modern e Classic."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(34)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(8, 0, 8, 0)
+        lay.setSpacing(10)
+
+        self._icon = QLabel()
+        self._icon.setFont(QFont(FONT_SANS, 11))
+        self._icon.setFixedWidth(18)
+        self._icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self._lbl = QLabel()
+        self._lbl.setFont(QFont(FONT_SANS, 11))
+
+        lay.addWidget(self._icon)
+        lay.addWidget(self._lbl, 1)
+
+        self._upd()
+        theme_manager.ui_theme_changed.connect(self._upd)
+
+    def _upd(self, _theme: str = ""):
+        is_modern = theme_manager.ui_theme == "modern"
+        self._icon.setText("💎" if is_modern else "📜")
+        self._lbl.setText("Tema Moderno" if is_modern else "Tema Classico")
+        self._lbl.setStyleSheet(f"color: {COLORS['text_mid']}; background: transparent;")
+        self.setStyleSheet("background: transparent; border-radius: 4px;")
+
+    def enterEvent(self, e):
+        self.setStyleSheet(f"background: {COLORS['panel_hover']}; border-radius: 4px;")
+
+    def leaveEvent(self, e):
+        self.setStyleSheet("background: transparent; border-radius: 4px;")
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            new_theme = "classic" if theme_manager.ui_theme == "modern" else "modern"
+            theme_manager.set_ui_theme(new_theme)
+
+
 # -- FOOTER WIDGET -------------------------------------------------------------
 
 class FooterWidget(QWidget):
@@ -534,6 +578,7 @@ class Sidebar(QWidget):
         inner_lay.addWidget(self._div_bot)
         inner_lay.addWidget(spacer(h=4))
         inner_lay.addWidget(ThemeToggleBtn())
+        inner_lay.addWidget(StyleToggleBtn())
         inner_lay.addWidget(spacer(h=4))
         inner_lay.addWidget(FooterWidget())
 
