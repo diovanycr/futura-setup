@@ -493,8 +493,8 @@ class _ResultCard(QFrame):
         lay.addSpacing(4)
         self._btn_copiar_build = self._make_copy_btn("Copiar BUILD")
         self._btn_copiar_tudo  = self._make_copy_btn("Copiar Tudo")
-        self._btn_copiar_build.setFixedWidth(90)
-        self._btn_copiar_tudo.setFixedWidth(90)
+        self._btn_copiar_build.setFixedWidth(130)
+        self._btn_copiar_tudo.setFixedWidth(130)
         self._btn_copiar_build.clicked.connect(self._copiar_build)
         self._btn_copiar_tudo.clicked.connect(self._copiar_tudo)
 
@@ -506,7 +506,7 @@ class _ResultCard(QFrame):
         lay.addLayout(row_copy)
 
         # -- Caminho --------------------------------------------------------
-        lay.addSpacing(4)
+        lay.addSpacing(12)
         self._lbl_arquivo = QLabel("")
         self._lbl_arquivo.setFont(QFont(FONT_MONO, 8))
         self._lbl_arquivo.setWordWrap(True)
