@@ -443,8 +443,8 @@ class StyleToggleBtn(QWidget):
 
     def _upd(self, _theme: str = ""):
         is_modern = theme_manager.ui_theme == "modern"
-        self._icon.setText("💎" if is_modern else "📜")
-        self._lbl.setText("Tema Moderno" if is_modern else "Tema Classico")
+        self._icon.setText("📜" if is_modern else "💎")
+        self._lbl.setText("Tema Classico" if is_modern else "Tema Moderno")
         self._lbl.setStyleSheet(f"color: {COLORS['text_mid']}; background: transparent;")
         self.setStyleSheet("background: transparent; border-radius: 4px;")
 

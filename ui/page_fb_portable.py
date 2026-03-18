@@ -732,256 +732,148 @@ class _DatabasesConfCard(QFrame):
         self.setObjectName("db_conf_card")
         self._arquivos: list[str] = []
         self._worker: QThread | None = None
-        
-        # Elementos de UI
-        self._radio_fb3 = None
-        self._radio_fb4 = None
-        self._lbl_count = None
-        self._lista     = None
-        self._btn_varrer  = None
-        self._btn_explorer = None
-        self._btn_aplicar = None
-        self._lbl_dados   = None
-        self._lbl_cep     = None
-        self._lbl_resultado = None
 
-        # Container principal de layout (FIXO)
-        self._root_lay = QVBoxLayout(self)
-        self._root_lay.setContentsMargins(0, 0, 0, 0)
-        
-        # Widget que conterá o layout do tema (MUTÁVEL)
-        self._container = QWidget()
-        self._root_lay.addWidget(self._container)
-
+        # Constrói UI única; tema altera apenas o CSS
         self._build_ui()
-        self._upd_style()
-        
+
+        theme_manager.ui_theme_changed.connect(self._upd_style)
         theme_manager.theme_changed.connect(lambda _: self._upd_style())
-        theme_manager.ui_theme_changed.connect(self._on_ui_theme_changed)
-
-    def _on_ui_theme_changed(self):
-        # Reconstrói a UI
-        self._build_ui()
         self._upd_style()
+
 
     def _build_ui(self):
-        # 1. Limpar layout e widgets existentes no container
-        if self._container.layout():
-            layout = self._container.layout()
-            while layout.count():
-                item = layout.takeAt(0)
-                if item.widget():
-                    item.widget().deleteLater()
-            # Deletar o layout antigo do container
-            import sip
-            try: sip.delete(layout)
-            except: pass
-
-        # 2. Criar novo layout dentro do container com base no tema
-        if theme_manager.ui_theme == "modern":
-            self._build_ui_modern()
-        else:
-            self._build_ui_classic()
-
-    def _build_ui_modern(self):
-        lay = QVBoxLayout(self._container)
-        lay.setContentsMargins(20, 20, 20, 20)
-        lay.setSpacing(15)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(16, 14, 16, 14)
+        lay.setSpacing(10)
 
         # --- HEADER ---
-        header_lay = QHBoxLayout()
-        icon_box = QLabel("💾")
-        icon_box.setFont(QFont(FONT_SANS, 18))
-        
+        self._header_frame = QFrame()
+        self._header_frame.setObjectName("db_header")
+        header_inner = QHBoxLayout(self._header_frame)
+        header_inner.setContentsMargins(12, 8, 12, 8)
+
+        self._header_icon = QLabel("💾")
+        self._header_icon.setFont(QFont(FONT_SANS, 18))
+
         titulo_v = QVBoxLayout()
-        titulo = QLabel("Configurar bases de dados")
-        titulo.setFont(QFont(FONT_SANS, 12, QFont.Weight.Bold))
-        titulo.setStyleSheet(f"color:{COLORS.get('text','#fff')};")
-        subtitulo = QLabel("Selecione o arquivo .fdb para configurar o databases.conf")
-        subtitulo.setFont(QFont(FONT_SANS, 9))
-        subtitulo.setStyleSheet(f"color:{COLORS.get('text_dim','#888')};")
-        titulo_v.addWidget(titulo)
-        titulo_v.addWidget(subtitulo)
-        
-        header_lay.addWidget(icon_box)
-        header_lay.addLayout(titulo_v)
-        header_lay.addStretch()
-        
+        self._titulo_lbl = QLabel("Configurar bases de dados")
+        self._titulo_lbl.setFont(QFont(FONT_SANS, 11, QFont.Weight.Bold))
+        self._subtitulo_lbl = QLabel("Selecione o arquivo .fdb para configurar o databases.conf")
+        self._subtitulo_lbl.setFont(QFont(FONT_SANS, 9))
+        titulo_v.addWidget(self._titulo_lbl)
+        titulo_v.addWidget(self._subtitulo_lbl)
+
         info_btn = QLabel("ⓘ")
         info_btn.setToolTip(
             "O sistema buscará por arquivos .fdb. Ao selecionar o arquivo principal (Dados), "
             "o arquivo de CEP será vinculado automaticamente se estiver na mesma pasta."
         )
-        info_btn.setStyleSheet(f"color:{COLORS.get('accent','#0078d4')}; font-size: 16px; font-weight:bold;")
-        header_lay.addWidget(info_btn)
-        lay.addLayout(header_lay)
 
-        # --- CONTROLS BOX ---
-        ctrl_frame = QFrame()
-        ctrl_frame.setObjectName("ctrl_box")
-        ctrl_lay = QHBoxLayout(ctrl_frame)
+        header_inner.addWidget(self._header_icon)
+        header_inner.addLayout(titulo_v, 1)
+        header_inner.addWidget(info_btn)
+        lay.addWidget(self._header_frame)
+
+        # --- CONTROLES ---
+        self._ctrl_frame = QFrame()
+        self._ctrl_frame.setObjectName("ctrl_box")
+        ctrl_lay = QHBoxLayout(self._ctrl_frame)
         ctrl_lay.setContentsMargins(12, 8, 12, 8)
-        
+
         lbl_v = QLabel("Versão Firebird:")
         lbl_v.setFont(QFont(FONT_SANS, 9, QFont.Weight.Bold))
-        
-        self._radio_fb3 = QRadioButton("3.0")
-        self._radio_fb4 = QRadioButton("4.0")
+
+        self._radio_fb3 = QRadioButton("FB 3.0")
+        self._radio_fb4 = QRadioButton("FB 4.0")
         self._radio_fb4.setChecked(True)
-        
+
         v_group = QHBoxLayout()
-        v_group.setSpacing(15)
+        v_group.setSpacing(12)
         v_group.addWidget(self._radio_fb3)
         v_group.addWidget(self._radio_fb4)
-        
-        self._btn_varrer = make_primary_btn("🔍  VARREVAR HD", 130)
+
+        self._btn_varrer = make_primary_btn("🔍  VARRER HD", 130)
         self._btn_varrer.setFixedHeight(32)
         self._btn_varrer.clicked.connect(self._on_varrer)
 
         self._btn_explorer = make_secondary_btn("📂  PROCURAR", 120)
         self._btn_explorer.setFixedHeight(32)
         self._btn_explorer.clicked.connect(self._on_selecionar_explorer)
-        
+
         ctrl_lay.addWidget(lbl_v)
         ctrl_lay.addLayout(v_group)
-        ctrl_lay.addSpacing(20)
+        ctrl_lay.addSpacing(16)
         ctrl_lay.addWidget(self._btn_varrer)
         ctrl_lay.addWidget(self._btn_explorer)
         ctrl_lay.addStretch()
-        lay.addWidget(ctrl_frame)
+        lay.addWidget(self._ctrl_frame)
 
-        # --- LIST AREA ---
-        list_container = QVBoxLayout()
-        list_container.setSpacing(5)
-        
+        # --- LISTA ---
         self._lbl_count = QLabel("Aguardando início da varredura...")
         self._lbl_count.setFont(QFont(FONT_MONO, 8))
-        self._lbl_count.setStyleSheet(f"color:{COLORS.get('accent','#0078d4')};")
-        
-        self._lista = QListWidget()
-        self._lista.setMinimumHeight(200)
-        self._lista.setFont(QFont(FONT_MONO, 9))
-        self._lista.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self._lista.itemSelectionChanged.connect(self._on_selecao_changed)
-        
-        list_container.addWidget(self._lbl_count)
-        list_container.addWidget(self._lista)
-        lay.addLayout(list_container)
-
-        # --- PREVIEW CARDS ---
-        preview_box = QHBoxLayout()
-        preview_box.setSpacing(10)
-
-        def make_path_card(title, color):
-            f = QFrame()
-            f.setStyleSheet(f"background: rgba(0,0,0,0.2); border-radius: 6px; border: 1px solid {COLORS.get('border','#333')};")
-            l = QVBoxLayout(f)
-            l.setContentsMargins(10, 8, 10, 8)
-            l.setSpacing(2)
-            t = QLabel(title)
-            t.setFont(QFont(FONT_SANS, 7, QFont.Weight.Bold))
-            t.setStyleSheet(f"color: {color}; text-transform: uppercase;")
-            v = QLabel("—")
-            v.setWordWrap(True)
-            v.setFont(QFont(FONT_MONO, 8))
-            l.addWidget(t)
-            l.addWidget(v)
-            return f, v
-
-        card_d, self._lbl_dados = make_path_card("Arquivo de Dados", COLORS.get("accent", "#0078d4"))
-        card_c, self._lbl_cep = make_path_card("Arquivo de CEP", COLORS.get("text_dim", "#888"))
-        
-        preview_box.addWidget(card_d, 1)
-        preview_box.addWidget(card_c, 1)
-        lay.addLayout(preview_box)
-
-        # --- FOOTER / ACTION ---
-        footer_lay = QHBoxLayout()
-        
-        self._btn_aplicar = make_primary_btn("✨  CONFIGURAR AGORA", 200)
-        self._btn_aplicar.setFixedHeight(40)
-        self._btn_aplicar.setEnabled(False)
-        self._btn_aplicar.clicked.connect(self._on_aplicar)
-
-        self._lbl_resultado = QLabel("")
-        self._lbl_resultado.setFont(QFont(FONT_SANS, 10, QFont.Weight.Bold))
-        self._lbl_resultado.setWordWrap(True)
-        
-        footer_lay.addWidget(self._btn_aplicar)
-        footer_lay.addSpacing(15)
-        footer_lay.addWidget(self._lbl_resultado, 1)
-        lay.addLayout(footer_lay)
-        lay.addStretch()
-
-    def _build_ui_classic(self):
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(16, 14, 16, 14)
-        lay.setSpacing(10)
-
-        header_lay = QHBoxLayout()
-        titulo = QLabel("Configurar databases.conf (Classic)")
-        titulo.setFont(QFont(FONT_SANS, 11, QFont.Weight.Bold))
-        
-        info_btn = QLabel("ⓘ")
-        info_btn.setToolTip("Modo clássico de configuração.")
-        
-        header_lay.addWidget(titulo)
-        header_lay.addWidget(info_btn)
-        header_lay.addStretch()
-        lay.addLayout(header_lay)
-
-        ctrl_row = QHBoxLayout()
-        self._radio_fb3 = QRadioButton("3")
-        self._radio_fb4 = QRadioButton("4")
-        self._radio_fb4.setChecked(True)
-        
-        self._btn_varrer = make_primary_btn("Varrer HD", 100)
-        self._btn_varrer.clicked.connect(self._on_varrer)
-
-        self._btn_explorer = make_secondary_btn("Procurar", 100)
-        self._btn_explorer.clicked.connect(self._on_selecionar_explorer)
-        
-        ctrl_row.addWidget(QLabel("FB:"))
-        ctrl_row.addWidget(self._radio_fb3)
-        ctrl_row.addWidget(self._radio_fb4)
-        ctrl_row.addWidget(self._btn_varrer)
-        ctrl_row.addWidget(self._btn_explorer)
-        ctrl_row.addStretch()
-        lay.addLayout(ctrl_row)
-
-        self._lbl_count = QLabel("")
         lay.addWidget(self._lbl_count)
 
         self._lista = QListWidget()
-        self._lista.setMinimumHeight(150)
+        self._lista.setMinimumHeight(180)
+        self._lista.setFont(QFont(FONT_MONO, 9))
+        self._lista.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self._lista.itemSelectionChanged.connect(self._on_selecao_changed)
         lay.addWidget(self._lista)
 
-        prev_lay = QGridLayout()
-        self._lbl_dados = QLabel("—")
-        self._lbl_cep = QLabel("—")
-        prev_lay.addWidget(QLabel("Dados:"), 0, 0)
-        prev_lay.addWidget(self._lbl_dados, 0, 1)
-        prev_lay.addWidget(QLabel("Cep:"), 1, 0)
-        prev_lay.addWidget(self._lbl_cep, 1, 1)
-        lay.addLayout(prev_lay)
+        # --- PREVIEW PATHS ---
+        self._preview_frame = QFrame()
+        self._preview_frame.setObjectName("preview_box")
+        prev_lay = QGridLayout(self._preview_frame)
+        prev_lay.setContentsMargins(10, 6, 10, 6)
+        prev_lay.setSpacing(4)
 
-        self._btn_aplicar = make_primary_btn("Aplicar", 120)
+        self._lbl_dados_tag = QLabel("Dados:")
+        self._lbl_dados_tag.setFont(QFont(FONT_SANS, 8, QFont.Weight.Bold))
+        self._lbl_dados = QLabel("—")
+        self._lbl_dados.setWordWrap(True)
+        self._lbl_dados.setFont(QFont(FONT_MONO, 8))
+
+        self._lbl_cep_tag = QLabel("CEP:")
+        self._lbl_cep_tag.setFont(QFont(FONT_SANS, 8, QFont.Weight.Bold))
+        self._lbl_cep = QLabel("—")
+        self._lbl_cep.setWordWrap(True)
+        self._lbl_cep.setFont(QFont(FONT_MONO, 8))
+
+        prev_lay.addWidget(self._lbl_dados_tag, 0, 0)
+        prev_lay.addWidget(self._lbl_dados,     0, 1)
+        prev_lay.addWidget(self._lbl_cep_tag,   1, 0)
+        prev_lay.addWidget(self._lbl_cep,       1, 1)
+        lay.addWidget(self._preview_frame)
+
+        # --- AÇÃO ---
+        self._btn_aplicar = make_primary_btn("✨  CONFIGURAR AGORA", 200)
+        self._btn_aplicar.setFixedHeight(38)
         self._btn_aplicar.setEnabled(False)
         self._btn_aplicar.clicked.connect(self._on_aplicar)
+
         self._lbl_resultado = QLabel("")
-        
+        self._lbl_resultado.setFont(QFont(FONT_SANS, 9, QFont.Weight.Bold))
+        self._lbl_resultado.setWordWrap(True)
+
         bt_row = QHBoxLayout()
         bt_row.addWidget(self._btn_aplicar)
+        bt_row.addSpacing(12)
         bt_row.addWidget(self._lbl_resultado, 1)
         lay.addLayout(bt_row)
         lay.addStretch()
+
 
     def set_version(self, versao: str):
         if versao == "3":
             self._radio_fb3.setChecked(True)
         elif versao == "4":
             self._radio_fb4.setChecked(True)
+
+
+
+    # -- Varredura --------------------------------------------------------
+
+
 
     # -- Varredura --------------------------------------------------------
 
@@ -1622,10 +1514,21 @@ class PageFbPortable(QWidget):
         lay.setContentsMargins(20, 16, 20, 12)
         lay.setSpacing(8)
 
-        lay.addWidget(PageTitle(
+        # Título dinâmico baseado no tema
+        self._title_widget = PageTitle(
             "FIREBIRD PORTABLE",
             "Instale, ative e configure FB3 e FB4 de forma independente"
-        ))
+        )
+        lay.addWidget(self._title_widget)
+
+        def _upd_title():
+            if theme_manager.ui_theme == "modern":
+                self._title_widget.set_subtitle("✨ Interface Premium - Configuração Avançada")
+            else:
+                self._title_widget.set_subtitle("Instale, ative e configure FB3 e FB4 de forma independente")
+        
+        theme_manager.ui_theme_changed.connect(_upd_title)
+        _upd_title()
 
         # Banner admin
         if not is_admin():

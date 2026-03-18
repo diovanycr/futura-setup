@@ -323,6 +323,10 @@ class PageTitle(QWidget):
         self._upd()
         theme_manager.theme_changed.connect(self._upd)
 
+    def set_subtitle(self, text: str):
+        self._title_lbl.setText(text)
+        self._upd()
+
     def _upd(self, _mode: str = ""):
         self._tag_lbl.setStyleSheet(
             f"color: {COLORS['text_dim']}; background: transparent; border: none;"
