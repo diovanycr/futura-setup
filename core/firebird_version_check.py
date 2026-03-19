@@ -11,6 +11,11 @@
 #   Calculada a partir do BUILD_BD da tabela PARAMETROS.
 #   Âncoras confirmadas: 73xxx = 2021.04.26 | 114xxx = 2026.02.09
 #   Intervalo médio entre releases: ~42.68 dias
+#
+# ID do Cliente:
+#   Calculado a partir do CI da tabela PARAMETROS.
+#   Se CI terminar em "001" → ID = "1" + 4 primeiros dígitos do CI
+#   Caso contrário          → ID = 4 primeiros dígitos do CI
 # =============================================================================
 from __future__ import annotations
 
@@ -114,11 +119,100 @@ def _build_para_versao_futura(build_bd: int) -> tuple[str, bool]:
         prefix = int(s[:1])
 
     if prefix in _FUTURA_HISTORICO:
-        return _FUTURA_HISTORICO[prefix], False
+        versao_completa = _FUTURA_HISTORICO[prefix]
+        versao_curta    = ".".join(versao_completa.split(".")[:2])  # AAAA.MM
+        return versao_curta, False
 
     days = (prefix - _FUTURA_ANCHOR_PREFIX) * _FUTURA_AVG_INTERVAL
     dt   = _FUTURA_ANCHOR_DATE + timedelta(days=days)
-    return dt.strftime("%Y.%m.%d"), True
+    return dt.strftime("%Y.%m"), True
+
+
+# =============================================================================
+# ID do Cliente — cálculo por CI
+# =============================================================================
+
+def ci_para_id_cliente(ci: str | int) -> str:
+    """
+    Calcula o ID do Cliente a partir do campo CI da tabela PARAMETROS.
+
+    Regras:
+        - Se CI terminar em "001" → ID = "1" + 4 primeiros dígitos do CI
+        - Caso contrário          → ID = 4 primeiros dígitos do CI
+
+    Exemplos:
+        ci_para_id_cliente("258469847074090202050001") → "12584"
+        ci_para_id_cliente("258469847074090202050002") → "2584"
+        ci_para_id_cliente(258469847074090202050001)   → "12584"
+
+    Retorna "" se o CI for inválido ou tiver menos de 4 dígitos.
+    """
+    ci_str = str(ci).strip()
+
+    # Remover caracteres não numéricos (hífens, espaços, etc.)
+    ci_str = re.sub(r"\D", "", ci_str)
+
+    if len(ci_str) < 4:
+        return ""
+
+    primeiros = ci_str[:4]
+
+    if ci_str.endswith("001"):
+        return "1" + primeiros
+
+    return primeiros
+
+
+def _consultar_ci(
+    path: str, user: str, password: str, ods_major: int = 0
+) -> tuple[str | None, str]:
+    """
+    Conecta no .fdb via módulo fdb e retorna (CI, erro).
+    Executa: SELECT CI FROM PARAMETROS
+    """
+    try:
+        import fdb  # type: ignore
+    except ImportError:
+        return None, "Modulo 'fdb' nao instalado. Execute: pip install fdb"
+
+    dll = _encontrar_fbclient_dll(ods_major)
+    if not dll:
+        return None, (
+            "fbclient.dll nao encontrada. "
+            "Instale o Firebird ou copie fbclient.dll para C:\\FuturaFirebird\\FB\\"
+        )
+
+    try:
+        fdb.load_api(dll)
+    except Exception as e:
+        return None, f"Erro ao carregar fbclient.dll ({dll}): {e}"
+
+    tentativas = [
+        {"host": "",          "database": path},
+        {"host": "localhost", "database": path},
+    ]
+
+    ultimo_erro = ""
+    for params in tentativas:
+        try:
+            con = fdb.connect(
+                host=params["host"],
+                database=params["database"],
+                user=user,
+                password=password,
+            )
+            cur = con.cursor()
+            cur.execute("SELECT CI FROM PARAMETROS")
+            row = cur.fetchone()
+            con.close()
+            if row and row[0] is not None:
+                return str(row[0]).strip(), ""
+            return None, "Campo CI vazio ou nulo em PARAMETROS."
+        except Exception as e:
+            ultimo_erro = str(e)
+            continue
+
+    return None, ultimo_erro
 
 
 def _encontrar_fbclient_dll(ods_major: int = 0) -> str | None:
@@ -129,7 +223,6 @@ def _encontrar_fbclient_dll(ods_major: int = 0) -> str | None:
     Se ods_major == 12 (FB3):     prioriza DLLs do Firebird 3.
     Se ods_major == 0 (desconhecido): tenta FB4 primeiro.
     """
-    # Candidatos FB4/FB5
     fb4_candidatos = [
         r"C:\FuturaFirebird\FB\fbclient.dll",
         r"C:\FuturaFirebird\FB4\fbclient.dll",
@@ -139,25 +232,22 @@ def _encontrar_fbclient_dll(ods_major: int = 0) -> str | None:
         r"C:\Program Files (x86)\Firebird\Firebird_4_0\fbclient.dll",
     ]
 
-    # Candidatos FB3
     fb3_candidatos = [
         r"C:\FuturaFirebird\FB3\fbclient.dll",
         r"C:\Program Files\Firebird\Firebird_3_0\fbclient.dll",
         r"C:\Program Files (x86)\Firebird\Firebird_3_0\fbclient.dll",
     ]
 
-    # Fallback genérico
     fallback = [
         r"C:\Windows\System32\fbclient.dll",
         r"C:\Windows\SysWOW64\fbclient.dll",
     ]
 
-    # Definir ordem de acordo com ODS
-    if ods_major >= 13:        # FB4 ou FB5
+    if ods_major >= 13:
         ordem = fb4_candidatos + fb3_candidatos + fallback
-    elif ods_major == 12:      # FB3
+    elif ods_major == 12:
         ordem = fb3_candidatos + fb4_candidatos + fallback
-    else:                      # desconhecido — tenta FB4 primeiro
+    else:
         ordem = fb4_candidatos + fb3_candidatos + fallback
 
     for c in ordem:
@@ -237,18 +327,16 @@ def _encontrar_fb_dir() -> str | None:
     def _tem_gfix(pasta: str) -> bool:
         return os.path.isfile(os.path.join(pasta, "gfix.exe"))
 
-    # 1. Portable Futura — gfix.exe direto na raiz da pasta
     portable_bases = [
         r"C:\FuturaFirebird\FB",
         r"C:\FuturaFirebird\FB4",
         r"C:\FuturaFirebird\Firebird",
-        r"C:\FuturaFirebird\FB3",  # FB3 por ultimo
+        r"C:\FuturaFirebird\FB3",
     ]
     for base in portable_bases:
         if _tem_gfix(base):
             return base
 
-    # 2. Registro do Windows
     chaves = [
         (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Firebird Project\Firebird Server\Instances"),
         (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Firebird Project\Firebird Server\Instances"),
@@ -262,7 +350,6 @@ def _encontrar_fb_dir() -> str | None:
         except Exception:
             continue
 
-    # 3. Pastas padrão de instalação
     candidatos = [
         r"C:\Program Files\Firebird\Firebird_5_0",
         r"C:\Program Files\Firebird\Firebird_4_0",
@@ -439,7 +526,7 @@ def verificar_versao_fdb(
     rodar_gfix: bool = True,
 ) -> dict:
     """
-    Lê o cabeçalho binário do .fdb, consulta BUILD_BD via fdb e
+    Lê o cabeçalho binário do .fdb, consulta BUILD_BD e CI via fdb e
     opcionalmente roda gfix -validate.
 
     Retorna dict com:
@@ -462,6 +549,9 @@ def verificar_versao_fdb(
         versao_futura       : str   — versão do sistema Futura (ex: 2026.02.09)
         versao_futura_est   : bool  — True se estimado, False se confirmado
         versao_futura_erro  : str   — erro ao consultar BUILD_BD (se houver)
+        ci                  : str   — valor bruto de SELECT CI FROM PARAMETROS
+        id_cliente          : str   — ID do cliente calculado (ex: "12584")
+        id_cliente_erro     : str   — erro ao consultar CI (se houver)
         erro                : str   — erro geral (arquivo não encontrado, etc.)
     """
     result = {
@@ -484,6 +574,9 @@ def verificar_versao_fdb(
         "versao_futura":     "",
         "versao_futura_est": False,
         "versao_futura_erro": "",
+        "ci":                "",
+        "id_cliente":        "",
+        "id_cliente_erro":   "",
         "erro":              "",
     }
 
@@ -547,6 +640,13 @@ def verificar_versao_fdb(
         if build_bd:
             versao_futura, versao_futura_est = _build_para_versao_futura(build_bd)
 
+        # -- Consulta CI e ID do Cliente -------------------------------------
+        ci_raw, ci_erro = _consultar_ci(path, user, password, ods_major)
+
+        id_cliente = ""
+        if ci_raw:
+            id_cliente = ci_para_id_cliente(ci_raw)
+
         result.update({
             "ok":                True,
             "ods_major":         ods_major,
@@ -567,6 +667,9 @@ def verificar_versao_fdb(
             "versao_futura":     versao_futura,
             "versao_futura_est": versao_futura_est,
             "versao_futura_erro": fdb_erro,
+            "ci":                ci_raw or "",
+            "id_cliente":        id_cliente,
+            "id_cliente_erro":   ci_erro,
             "erro":              "",
         })
 
