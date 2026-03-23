@@ -1,30 +1,66 @@
 # =============================================================================
 # FUTURA SETUP — Core: Verificar Versão + Integridade do Firebird via .fdb
 # Salvar em: core/firebird_version_check.py
-#
-# Layout real do header confirmado por análise binária:
-#   offset 16 : uint16 LE — page size         (ex: 16384)
-#   offset 18 : byte baixo — ODS major         (ex: 0x0c = 12 = FB3)
-#   offset 20 : byte baixo — ODS minor         (ex: 0x03 = 3)
-#
-# Versão Futura:
-#   Calculada a partir do BUILD_BD da tabela PARAMETROS.
-#   Âncoras confirmadas: 73xxx = 2021.04.26 | 114xxx = 2026.02.09
-#   Intervalo médio entre releases: ~42.68 dias
-#
-# ID do Cliente:
-#   Calculado a partir do CI da tabela PARAMETROS.
-#   Se CI terminar em "001" → ID = "1" + 4 primeiros dígitos do CI
-#   Caso contrário          → ID = 4 primeiros dígitos do CI
 # =============================================================================
 from __future__ import annotations
 
+import base64
 import os
 import re
 import struct
 import subprocess
 import winreg
 from datetime import datetime, timedelta
+
+
+# =============================================================================
+# Descriptografia AES — campo VERSAO da tabela PARAMETROS
+# =============================================================================
+
+_AES_CHAVE = "H5m4454pFjh201dp54Ddd8gP5Hf6GVFd"
+
+
+def decrypt_aes(base64_texto: str, chave_str: str = _AES_CHAVE) -> str:
+    """
+    Descriptografa um valor AES-CBC/PKCS7 no formato usado pelo sistema Futura.
+
+    Formato do valor cifrado:
+        base64( base64(dados_cifrados) + "::" + iv_utf8 )
+
+    Args:
+        base64_texto: String base64 vinda do campo VERSAO (ou outro campo cifrado).
+        chave_str:    Chave AES de 32 bytes. Padrão: _AES_CHAVE.
+
+    Returns:
+        String descriptografada (ex: "2026.02.09") ou "" em caso de erro.
+
+    Raises:
+        ImportError: Se pycryptodome não estiver instalado.
+        Exception:   Outros erros de descriptografia.
+    """
+    try:
+        from Crypto.Cipher import AES          # type: ignore
+        from Crypto.Util.Padding import unpad  # type: ignore
+    except ImportError as exc:
+        raise ImportError(
+            "Modulo 'pycryptodome' nao instalado. Execute: pip install pycryptodome"
+        ) from exc
+
+    # Decodifica envelope externo → "base64(dados)::iv"
+    raw   = base64.b64decode(base64_texto)
+    texto = raw.decode("utf-8")
+
+    partes = texto.split("::")
+    if len(partes) != 2:
+        raise ValueError(f"Formato AES invalido — esperado 'dados::iv', obtido: {texto!r}")
+
+    dados = base64.b64decode(partes[0].strip())
+    iv    = partes[1].strip().encode("utf-8")
+    chave = chave_str[:32].encode("utf-8")
+
+    cipher     = AES.new(chave, AES.MODE_CBC, iv)
+    decriptado = unpad(cipher.decrypt(dados), AES.block_size)
+    return decriptado.decode("utf-8")
 
 
 # =============================================================================
@@ -65,7 +101,7 @@ _VALID_PAGE_SIZES = {1024, 2048, 4096, 8192, 16384, 32768}
 
 
 # =============================================================================
-# Versão do Sistema Futura — cálculo por BUILD_BD
+# Versão do Sistema Futura — cálculo por BUILD_BD (fallback)
 # =============================================================================
 
 _FUTURA_ANCHOR_PREFIX = 73
@@ -75,7 +111,6 @@ _FUTURA_AVG_INTERVAL  = (
     (_FUTURA_ANCHOR_114 - _FUTURA_ANCHOR_DATE).days / (114 - _FUTURA_ANCHOR_PREFIX)
 )  # ~42.68 dias por release
 
-# Dados históricos confirmados: prefixo → versão real
 _FUTURA_HISTORICO: dict[int, str] = {
     5:  "2015.12.02",  6:  "2016.03.14",  7:  "2016.04.11",
     8:  "2016.05.09",  9:  "2016.06.06",  10: "2016.08.01",
@@ -103,12 +138,11 @@ _FUTURA_HISTORICO: dict[int, str] = {
 
 def _build_para_versao_futura(build_bd: int) -> tuple[str, bool]:
     """
-    Converte BUILD_BD em versão do sistema Futura.
+    Converte BUILD_BD em versão estimada do sistema Futura (usado como fallback
+    quando o campo VERSAO não está disponível ou não pôde ser descriptografado).
 
     Retorna:
         (versao_str, is_estimado)
-        ex: ("2026.02.09", False)  → confirmado
-            ("2025.01.20", True)   → estimado por interpolação
     """
     s = str(abs(build_bd))
     if len(s) >= 5:
@@ -120,7 +154,7 @@ def _build_para_versao_futura(build_bd: int) -> tuple[str, bool]:
 
     if prefix in _FUTURA_HISTORICO:
         versao_completa = _FUTURA_HISTORICO[prefix]
-        versao_curta    = ".".join(versao_completa.split(".")[:2])  # AAAA.MM
+        versao_curta    = ".".join(versao_completa.split(".")[:2])
         return versao_curta, False
 
     days = (prefix - _FUTURA_ANCHOR_PREFIX) * _FUTURA_AVG_INTERVAL
@@ -139,37 +173,18 @@ def ci_para_id_cliente(ci: str | int) -> str:
     Regras:
         - Se CI terminar em "001" → ID = "1" + 4 primeiros dígitos do CI
         - Caso contrário          → ID = 4 primeiros dígitos do CI
-
-    Exemplos:
-        ci_para_id_cliente("258469847074090202050001") → "12584"
-        ci_para_id_cliente("258469847074090202050002") → "2584"
-        ci_para_id_cliente(258469847074090202050001)   → "12584"
-
-    Retorna "" se o CI for inválido ou tiver menos de 4 dígitos.
     """
-    ci_str = str(ci).strip()
-
-    # Remover caracteres não numéricos (hífens, espaços, etc.)
-    ci_str = re.sub(r"\D", "", ci_str)
-
+    ci_str = re.sub(r"\D", "", str(ci).strip())
     if len(ci_str) < 4:
         return ""
-
     primeiros = ci_str[:4]
-
-    if ci_str.endswith("001"):
-        return "1" + primeiros
-
-    return primeiros
+    return ("1" + primeiros) if ci_str.endswith("001") else primeiros
 
 
 def _consultar_ci(
     path: str, user: str, password: str, ods_major: int = 0
 ) -> tuple[str | None, str]:
-    """
-    Conecta no .fdb via módulo fdb e retorna (CI, erro).
-    Executa: SELECT CI FROM PARAMETROS
-    """
+    """Conecta no .fdb e retorna (CI, erro)."""
     try:
         import fdb  # type: ignore
     except ImportError:
@@ -191,15 +206,12 @@ def _consultar_ci(
         {"host": "",          "database": path},
         {"host": "localhost", "database": path},
     ]
-
     ultimo_erro = ""
     for params in tentativas:
         try:
             con = fdb.connect(
-                host=params["host"],
-                database=params["database"],
-                user=user,
-                password=password,
+                host=params["host"], database=params["database"],
+                user=user, password=password,
             )
             cur = con.cursor()
             cur.execute("SELECT CI FROM PARAMETROS")
@@ -216,13 +228,7 @@ def _consultar_ci(
 
 
 def _encontrar_fbclient_dll(ods_major: int = 0) -> str | None:
-    """
-    Localiza fbclient.dll compatível com a versão do banco.
-
-    Se ods_major >= 13 (FB4/FB5): prioriza DLLs do Firebird 4/5.
-    Se ods_major == 12 (FB3):     prioriza DLLs do Firebird 3.
-    Se ods_major == 0 (desconhecido): tenta FB4 primeiro.
-    """
+    """Localiza fbclient.dll compatível com a versão do banco."""
     fb4_candidatos = [
         r"C:\FuturaFirebird\FB\fbclient.dll",
         r"C:\FuturaFirebird\FB4\fbclient.dll",
@@ -231,18 +237,15 @@ def _encontrar_fbclient_dll(ods_major: int = 0) -> str | None:
         r"C:\Program Files\Firebird\Firebird_4_0\fbclient.dll",
         r"C:\Program Files (x86)\Firebird\Firebird_4_0\fbclient.dll",
     ]
-
     fb3_candidatos = [
         r"C:\FuturaFirebird\FB3\fbclient.dll",
         r"C:\Program Files\Firebird\Firebird_3_0\fbclient.dll",
         r"C:\Program Files (x86)\Firebird\Firebird_3_0\fbclient.dll",
     ]
-
     fallback = [
         r"C:\Windows\System32\fbclient.dll",
         r"C:\Windows\SysWOW64\fbclient.dll",
     ]
-
     if ods_major >= 13:
         ordem = fb4_candidatos + fb3_candidatos + fallback
     elif ods_major == 12:
@@ -256,14 +259,16 @@ def _encontrar_fbclient_dll(ods_major: int = 0) -> str | None:
     return None
 
 
-def _consultar_build_bd(
+def _consultar_parametros(
     path: str, user: str, password: str, ods_major: int = 0
-) -> tuple[int | None, str]:
+) -> tuple[dict | None, str]:
     """
-    Conecta no .fdb via módulo fdb e retorna (BUILD_BD, erro).
-    Executa: SELECT BUILD_BD FROM PARAMETROS
-    Usa acesso direto ao arquivo (host='') que funciona sem servico rodando.
-    Seleciona fbclient.dll compatível com o ODS do banco.
+    Consulta BUILD_BD, BUILD_EXE, VERSAO e CI da tabela PARAMETROS em uma
+    única conexão, reduzindo overhead de I/O.
+
+    Retorna:
+        ({"build_bd": int, "build_exe": int, "versao": str, "ci": str}, erro)
+        ou (None, mensagem_de_erro)
     """
     try:
         import fdb  # type: ignore
@@ -286,23 +291,25 @@ def _consultar_build_bd(
         {"host": "",          "database": path},
         {"host": "localhost", "database": path},
     ]
-
     ultimo_erro = ""
     for params in tentativas:
         try:
             con = fdb.connect(
-                host=params["host"],
-                database=params["database"],
-                user=user,
-                password=password,
+                host=params["host"], database=params["database"],
+                user=user, password=password,
             )
             cur = con.cursor()
-            cur.execute("SELECT BUILD_BD FROM PARAMETROS")
+            cur.execute("SELECT BUILD_BD, BUILD_EXE, VERSAO, CI FROM PARAMETROS")
             row = cur.fetchone()
             con.close()
-            if row:
-                return int(row[0]), ""
-            return None, "Tabela PARAMETROS vazia."
+            if not row:
+                return None, "Tabela PARAMETROS vazia."
+            return {
+                "build_bd":  int(row[0]) if row[0] is not None else 0,
+                "build_exe": int(row[1]) if row[1] is not None else 0,
+                "versao":    str(row[2]).strip() if row[2] is not None else "",
+                "ci":        str(row[3]).strip() if row[3] is not None else "",
+            }, ""
         except Exception as e:
             ultimo_erro = str(e)
             continue
@@ -315,14 +322,7 @@ def _consultar_build_bd(
 # =============================================================================
 
 def _encontrar_fb_dir() -> str | None:
-    """
-    Retorna o diretório do Firebird que contém gfix.exe.
-
-    Ordem de busca:
-      1. Portable Futura  — C:\\FuturaFirebird\\FB  (e subpasta bin\\)
-      2. Registro do Windows
-      3. Pastas padrão de instalação
-    """
+    """Retorna o diretório do Firebird que contém gfix.exe."""
 
     def _tem_gfix(pasta: str) -> bool:
         return os.path.isfile(os.path.join(pasta, "gfix.exe"))
@@ -360,7 +360,6 @@ def _encontrar_fb_dir() -> str | None:
     for c in candidatos:
         if _tem_gfix(c):
             return c
-
     return None
 
 
@@ -400,7 +399,6 @@ def _versao_instalada() -> str:
     for v in ["5_0", "4_0", "3_0"]:
         if v in nome:
             return f"{v.replace('_', '.')} (pasta: {os.path.basename(fb_dir)})"
-
     return f"Instalado em: {fb_dir}"
 
 
@@ -431,13 +429,9 @@ def _validar_com_gfix(path: str, user: str, password: str) -> dict:
     try:
         proc = subprocess.run(
             [gfix, "-validate", "-full", "-user", user, "-password", password, path],
-            capture_output=True,
-            timeout=120,
-            text=True,
-            encoding="utf-8",
-            errors="ignore",
+            capture_output=True, timeout=120, text=True,
+            encoding="utf-8", errors="ignore",
         )
-
         saida = (proc.stdout + proc.stderr).strip()
         resultado["executado"]   = True
         resultado["saida_bruta"] = saida
@@ -478,7 +472,6 @@ def _verificar_header(path: str, page_size: int) -> dict:
     resultado = {"ok": True, "erros": [], "detalhes": []}
     try:
         tamanho = os.path.getsize(path)
-
         if tamanho == 0:
             resultado["erros"].append("Arquivo vazio (0 bytes).")
             resultado["ok"] = False
@@ -526,8 +519,8 @@ def verificar_versao_fdb(
     rodar_gfix: bool = True,
 ) -> dict:
     """
-    Lê o cabeçalho binário do .fdb, consulta BUILD_BD e CI via fdb e
-    opcionalmente roda gfix -validate.
+    Lê o cabeçalho binário do .fdb, consulta BUILD_BD, BUILD_EXE, VERSAO e CI
+    via fdb e opcionalmente roda gfix -validate.
 
     Retorna dict com:
         ok                  : bool
@@ -545,10 +538,14 @@ def verificar_versao_fdb(
         gfix_avisos         : list[str]
         gfix_saida_bruta    : str
         gfix_msg            : str
-        build_bd            : int   — valor de SELECT BUILD_BD FROM PARAMETROS
-        versao_futura       : str   — versão do sistema Futura (ex: 2026.02.09)
-        versao_futura_est   : bool  — True se estimado, False se confirmado
-        versao_futura_erro  : str   — erro ao consultar BUILD_BD (se houver)
+        build_bd            : int   — SELECT BUILD_BD FROM PARAMETROS
+        build_exe           : int   — SELECT BUILD_EXE FROM PARAMETROS
+        versao_campo        : str   — valor descriptografado de VERSAO (ou "" se falhar)
+        versao_campo_erro   : str   — erro ao descriptografar VERSAO (se houver)
+        versao_futura       : str   — versão final exibida (VERSAO descriptografado
+                                      ou fallback por BUILD_BD)
+        versao_futura_est   : bool  — True se estimado por BUILD_BD, False se via VERSAO
+        versao_futura_erro  : str   — erro ao consultar/calcular versão (se houver)
         ci                  : str   — valor bruto de SELECT CI FROM PARAMETROS
         id_cliente          : str   — ID do cliente calculado (ex: "12584")
         id_cliente_erro     : str   — erro ao consultar CI (se houver)
@@ -571,6 +568,9 @@ def verificar_versao_fdb(
         "gfix_saida_bruta":  "",
         "gfix_msg":          "",
         "build_bd":          0,
+        "build_exe":         0,
+        "versao_campo":      "",
+        "versao_campo_erro": "",
         "versao_futura":     "",
         "versao_futura_est": False,
         "versao_futura_erro": "",
@@ -632,20 +632,49 @@ def verificar_versao_fdb(
             "erros": [], "avisos": [], "saida_bruta": "", "msg": "",
         }
 
-        # -- Consulta BUILD_BD e versão Futura -------------------------------
-        build_bd, fdb_erro = _consultar_build_bd(path, user, password, ods_major)
+        # -- Consulta única: BUILD_BD, BUILD_EXE, VERSAO, CI -----------------
+        params_data, params_erro = _consultar_parametros(path, user, password, ods_major)
 
+        build_bd  = 0
+        build_exe = 0
+        ci_raw    = ""
+        versao_campo      = ""
+        versao_campo_erro = ""
         versao_futura     = ""
         versao_futura_est = False
-        if build_bd:
-            versao_futura, versao_futura_est = _build_para_versao_futura(build_bd)
+        versao_futura_erro = params_erro
 
-        # -- Consulta CI e ID do Cliente -------------------------------------
-        ci_raw, ci_erro = _consultar_ci(path, user, password, ods_major)
+        if params_data:
+            build_bd  = params_data["build_bd"]
+            build_exe = params_data["build_exe"]
+            ci_raw    = params_data["ci"]
 
-        id_cliente = ""
-        if ci_raw:
-            id_cliente = ci_para_id_cliente(ci_raw)
+            # -- Descriptografar campo VERSAO --------------------------------
+            versao_raw = params_data["versao"]
+            if versao_raw:
+                try:
+                    versao_campo = decrypt_aes(versao_raw)
+                except ImportError as e:
+                    versao_campo_erro = str(e)
+                except Exception as e:
+                    versao_campo_erro = f"Erro ao descriptografar VERSAO: {e}"
+            else:
+                versao_campo_erro = "Campo VERSAO vazio em PARAMETROS."
+
+            # -- Versão final: VERSAO descriptografado ou fallback BUILD_BD --
+            if versao_campo:
+                versao_futura     = versao_campo
+                versao_futura_est = False
+                versao_futura_erro = ""
+            elif build_bd:
+                versao_futura, versao_futura_est = _build_para_versao_futura(build_bd)
+                versao_futura_erro = versao_campo_erro  # informa por que usou fallback
+            else:
+                versao_futura_erro = versao_campo_erro or params_erro
+
+        # -- ID do Cliente ---------------------------------------------------
+        id_cliente     = ci_para_id_cliente(ci_raw) if ci_raw else ""
+        id_cliente_erro = "" if ci_raw else (params_erro or "CI nao disponivel.")
 
         result.update({
             "ok":                True,
@@ -663,13 +692,16 @@ def verificar_versao_fdb(
             "gfix_avisos":       gfix["avisos"],
             "gfix_saida_bruta":  gfix["saida_bruta"],
             "gfix_msg":          gfix["msg"],
-            "build_bd":          build_bd or 0,
+            "build_bd":          build_bd,
+            "build_exe":         build_exe,
+            "versao_campo":      versao_campo,
+            "versao_campo_erro": versao_campo_erro,
             "versao_futura":     versao_futura,
             "versao_futura_est": versao_futura_est,
-            "versao_futura_erro": fdb_erro,
-            "ci":                ci_raw or "",
+            "versao_futura_erro": versao_futura_erro,
+            "ci":                ci_raw,
             "id_cliente":        id_cliente,
-            "id_cliente_erro":   ci_erro,
+            "id_cliente_erro":   id_cliente_erro,
             "erro":              "",
         })
 
