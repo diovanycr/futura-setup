@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
 from ui.theme import COLORS, FONT_SANS, FONT_MONO
 from ui.theme_manager import theme_manager
 from ui.widgets import (
-    PageTitle, SectionHeader, AlertBox, make_primary_btn, 
+    PageHeader, SectionHeader, AlertBox, make_primary_btn, 
     make_secondary_btn, make_folder_btn, btn_row, spacer, label, h_line
 )
 from core.logger import log
@@ -507,11 +507,8 @@ class _StepResultado(QWidget):
 
         self._root_lay.addWidget(h_line())
 
-        self._btn_nova = make_primary_btn("NOVA OPERAÇÃO", 160)
-        self._btn_menu = make_secondary_btn("MENU PRINCIPAL", 160)
         self._btn_nova.clicked.connect(self.nova_op.emit)
-        self._btn_menu.clicked.connect(self.go_menu.emit)
-        self._root_lay.addWidget(btn_row(self._btn_nova, self._btn_menu))
+        self._root_lay.addWidget(btn_row(self._btn_nova))
 
     def set_resultado(self, sucesso: bool, modo: str, cmd: str, saida: str):
         while self._scroll_lay.count():
@@ -549,21 +546,36 @@ class PageShutdownOnline(QWidget):
         self._modo_atual: str = ""
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(28, 24, 28, 14)
-        root.setSpacing(6)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        root.addWidget(PageTitle("", "Shutdown / Online"))
+        self._header = PageHeader("SHUTDOWN / ONLINE", "Controle de Shutdown/Online do Firebird")
+        self._header.back_clicked.connect(self._on_back_clicked)
+        root.addWidget(self._header)
+
+        # Container para o conteúdo original
+        content_w = QWidget()
+        content_lay = QVBoxLayout(content_w)
+        content_lay.setContentsMargins(28, 24, 28, 14)
+        content_lay.setSpacing(6)
 
         self._stack = QStackedWidget()
         self._form   = _StepFormulario()
         self._result = _StepResultado()
         self._stack.addWidget(self._form)    # 0
         self._stack.addWidget(self._result)  # 1
-        root.addWidget(self._stack, 1)
+        content_lay.addWidget(self._stack)
+        root.addWidget(content_w, 1)
 
+        # Conexoes
         self._form.executar.connect(self._on_executar)
-        self._result.go_menu.connect(self.go_menu.emit)
         self._result.nova_op.connect(self._go_form)
+
+    def _on_back_clicked(self):
+        if self._stack.currentIndex() > 0:
+            self._go_form()
+        else:
+            self.go_menu.emit()
 
     def reset(self):
         self._go_form()

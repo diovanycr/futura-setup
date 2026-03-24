@@ -298,43 +298,69 @@ class SectionHeader(QWidget):
 
 # ── PAGE TITLE ────────────────────────────────────────────────────────────────
 
-class PageTitle(QWidget):
-    def __init__(self, tag: str, title: str, parent=None):
+
+
+# ── PAGE HEADER (NOVO PADRÃO) ────────────────────────────────────────────────
+
+class PageHeader(QWidget):
+    """Cabeçalho padronizado com Título, Subtítulo e botão VOLTAR."""
+    back_clicked = pyqtSignal()
+
+    def __init__(self, title: str, subtitle: str = "", parent=None):
         super().__init__(parent)
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 24)
-        lay.setSpacing(2)
+        self.setObjectName("page_header")
+        
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(24, 20, 24, 16)
+        lay.setSpacing(20)
 
-        self._tag_lbl   = QLabel(tag.upper())
-        self._tag_lbl.setFont(QFont(FONT_SANS, 11))
+        # Bloco de Texto (Esquerda)
+        title_block = QWidget()
+        title_block.setStyleSheet("background: transparent; border: none;")
+        tb_lay = QVBoxLayout(title_block)
+        tb_lay.setContentsMargins(0, 0, 0, 0)
+        tb_lay.setSpacing(2)
 
-        self._title_lbl = QLabel(title)
-        self._title_lbl.setFont(QFont(FONT_SANS, 22, QFont.Weight.Bold))
+        self._lbl_title = QLabel(title.upper())
+        self._lbl_title.setFont(QFont(FONT_SANS, 15, QFont.Weight.Bold))
+        
+        self._lbl_sub = QLabel(subtitle)
+        self._lbl_sub.setFont(QFont(FONT_SANS, 10))
+        self._lbl_sub.setWordWrap(True)
 
-        self._line = QFrame()
-        self._line.setFrameShape(QFrame.Shape.HLine)
-        self._line.setFixedHeight(1)
+        tb_lay.addWidget(self._lbl_title)
+        tb_lay.addWidget(self._lbl_sub)
+        lay.addWidget(title_block, 1)
 
-        lay.addWidget(self._tag_lbl)
-        lay.addWidget(self._title_lbl)
-        lay.addWidget(spacer(h=6))
-        lay.addWidget(self._line)
+        # Botão Voltar (Direita)
+        self._btn_back = make_secondary_btn("VOLTAR", 80)
+        self._btn_back.clicked.connect(self.back_clicked.emit)
+        lay.addWidget(self._btn_back, 0, Qt.AlignmentFlag.AlignVCenter)
 
         self._upd()
         theme_manager.theme_changed.connect(self._upd)
 
+    def set_title(self, text: str):
+        self._lbl_title.setText(text.upper())
+
     def set_subtitle(self, text: str):
-        self._title_lbl.setText(text)
-        self._upd()
+        self._lbl_sub.setText(text)
 
     def _upd(self, _mode: str = ""):
-        self._tag_lbl.setStyleSheet(
-            f"color: {COLORS['text_dim']}; background: transparent; border: none;"
-        )
-        self._title_lbl.setStyleSheet(
-            f"color: {COLORS['text']}; background: transparent; border: none;"
-        )
-        self._line.setStyleSheet(f"background: {COLORS['border']}; border: none;")
+        bg      = COLORS.get("surface", "#111827")
+        border  = COLORS.get("border",  "#1e2d45")
+        text    = COLORS.get("text",    "#e2e8f0")
+        dim     = COLORS.get("text_dim","#64748b")
+
+        self.setStyleSheet(f"""
+            QWidget#page_header {{
+                background: {bg};
+                border-bottom: 1.5px solid {border};
+            }}
+            QLabel {{ background: transparent; border: none; }}
+        """)
+        self._lbl_title.setStyleSheet(f"color: {text};")
+        self._lbl_sub.setStyleSheet(f"color: {dim};")
 
 
 # ── ALERT BOX ─────────────────────────────────────────────────────────────────

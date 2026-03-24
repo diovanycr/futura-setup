@@ -17,7 +17,7 @@ from PyQt6.QtCore import pyqtSignal, Qt, QTimer
 from PyQt6.QtGui import QFont
 
 from ui.widgets import (
-    PageTitle, SectionHeader, AlertBox, LogConsole,
+    PageHeader, SectionHeader, AlertBox, LogConsole,
     make_primary_btn, make_secondary_btn, btn_row, spacer
 )
 from ui.theme import COLORS, FONT_SANS
@@ -53,7 +53,9 @@ class PageLog(QWidget):
         lay.setContentsMargins(40, 36, 40, 0)
         lay.setSpacing(0)
 
-        lay.addWidget(PageTitle("HISTÓRICO", "Log de Execuções"))
+        self._header = PageHeader("HISTÓRICO", "Log de Execuções")
+        self._header.back_clicked.connect(self.go_menu.emit)
+        root.insertWidget(0, self._header)
 
         self._alert = AlertBox(f"Arquivo: {log.log_path}", "info")
         lay.addWidget(self._alert)
@@ -140,10 +142,7 @@ class PageLog(QWidget):
         btn_open = make_secondary_btn("ABRIR EXTERNAMENTE", 190)
         btn_open.clicked.connect(self._open_external)
 
-        btn_voltar = make_secondary_btn("← VOLTAR", 110)
-        btn_voltar.clicked.connect(self.go_menu.emit)
-
-        footer_lay.addWidget(btn_row(btn_refresh, btn_export, btn_open, btn_voltar))
+        footer_lay.addWidget(btn_row(btn_refresh, btn_export, btn_open))
 
         root.addWidget(footer, 0)         # footer fixo, não expande
 

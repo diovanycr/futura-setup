@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import pyqtSignal, Qt, QPropertyAnimation, QEasingCurve, pyqtProperty
 from PyQt6.QtGui import QFont, QColor
 
-from ui.widgets import PageTitle, spacer
+from ui.widgets import PageHeader, spacer
 from ui.theme import COLORS, FONT_SANS
 from ui.theme_manager import theme_manager
 
@@ -158,16 +158,22 @@ class PageMenu(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(40, 36, 40, 36)
-        lay.setSpacing(0)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        lay.addWidget(PageTitle("FUTURA SETUP", "Menu Principal"))
-        lay.addWidget(spacer(h=8))
+        header = PageHeader("FUTURA SETUP", "Menu Principal", back_visible=False)
+        root.addWidget(header)
+
+        # Container para o conteúdo original
+        content_w = QWidget()
+        content_lay = QVBoxLayout(content_w)
+        content_lay.setContentsMargins(40, 24, 40, 36)
+        content_lay.setSpacing(0)
 
         # Secao: Implantacao
-        lay.addWidget(SectionLabel("IMPLANTACAO"))
-        lay.addWidget(spacer(h=6))
+        content_lay.addWidget(SectionLabel("IMPLANTACAO"))
+        content_lay.addWidget(spacer(h=6))
 
         grid_impl = QGridLayout()
         grid_impl.setSpacing(10)
@@ -197,19 +203,19 @@ class PageMenu(QWidget):
         grid_impl.addWidget(card_terminal,    0, 1)
         grid_impl.addWidget(card_atualizacao, 1, 0, 1, 2)
 
-        lay.addLayout(grid_impl)
-        lay.addWidget(spacer(h=20))
+        content_lay.addLayout(grid_impl)
+        content_lay.addWidget(spacer(h=20))
 
         # Divisor
         div = QFrame()
         div.setFrameShape(QFrame.Shape.HLine)
         div.setStyleSheet(f"color: {COLORS.get('border', '#444')};")
-        lay.addWidget(div)
-        lay.addWidget(spacer(h=12))
+        content_lay.addWidget(div)
+        content_lay.addWidget(spacer(h=12))
 
         # Secao: Firebird
-        lay.addWidget(SectionLabel("FIREBIRD"))
-        lay.addWidget(spacer(h=6))
+        content_lay.addWidget(SectionLabel("FIREBIRD"))
+        content_lay.addWidget(spacer(h=6))
 
         grid_fb = QGridLayout()
         grid_fb.setSpacing(10)

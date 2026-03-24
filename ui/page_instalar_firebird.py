@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
 from ui.theme         import COLORS, FONT_SANS, FONT_MONO
 from ui.theme_manager import theme_manager
 from ui.widgets       import (
-    PageTitle, SectionHeader, AlertBox, LogConsole, ProgressBlock,
+    PageHeader, SectionHeader, AlertBox, LogConsole, ProgressBlock,
     make_primary_btn, make_secondary_btn, btn_row, spacer, h_line, label,
 )
 from core.firebird_installer import (
@@ -1238,10 +1238,18 @@ class PageInstalarFirebird(QWidget):
         self._svc_cards     : dict[str, _ServicoCard] = {}
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(40, 36, 40, 20)
-        root.setSpacing(8)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        root.addWidget(PageTitle("INSTALAR FIREBIRD", "Download e instalacao silenciosa"))
+        self._header = PageHeader("FIREBIRD", "Instalação Oficial do Firebird")
+        self._header.back_clicked.connect(self._on_back_clicked)
+        root.addWidget(self._header)
+
+        # Container para o conteúdo original
+        content_w = QWidget()
+        content_lay = QVBoxLayout(content_w)
+        content_lay.setContentsMargins(40, 20, 40, 20)
+        content_lay.setSpacing(8)
 
         # Banner admin FORA das abas — igual ao Portable
         if not is_admin():
@@ -1373,18 +1381,6 @@ class PageInstalarFirebird(QWidget):
         lay.addLayout(card_lay)
         lay.addStretch()
 
-        lay.addWidget(h_line())
-        lay.addWidget(spacer(h=4))
-
-        btn_voltar = make_secondary_btn("Voltar", 90)
-        btn_voltar.setFixedHeight(36)
-        btn_voltar.clicked.connect(self.go_menu.emit)
-
-        foot = QHBoxLayout()
-        foot.addStretch()
-        foot.addWidget(btn_voltar)
-        lay.addLayout(foot)
-
         return w
 
     def _build_running(self) -> QWidget:
@@ -1425,34 +1421,6 @@ class PageInstalarFirebird(QWidget):
         lay.addWidget(self._res_alert)
         lay.addWidget(self._res_detalhe)
         lay.addStretch()
-        lay.addWidget(h_line())
-        lay.addWidget(spacer(h=4))
-
-        self._btn_ir_banco = make_primary_btn("CONFIGURAR BANCO DE DADOS", 240)
-        self._btn_ir_banco.setFixedHeight(40)
-        self._btn_ir_banco.setVisible(False)
-        self._btn_ir_banco.clicked.connect(self._ir_para_banco)
-
-        self._btn_ir_servico = make_primary_btn("GERENCIAR SERVICO", 200)
-        self._btn_ir_servico.setFixedHeight(40)
-        self._btn_ir_servico.setVisible(False)
-        self._btn_ir_servico.clicked.connect(self._ir_para_servico)
-
-        btn_nova   = make_secondary_btn("Nova Instalacao", 160)
-        btn_voltar = make_secondary_btn("Voltar", 90)
-        btn_nova.clicked.connect(self._go_novo)
-        btn_voltar.clicked.connect(self.go_menu.emit)
-
-        # Linha com os dois botões de ação pós-instalação
-        acoes_lay = QHBoxLayout()
-        acoes_lay.setSpacing(10)
-        acoes_lay.addWidget(self._btn_ir_servico)
-        acoes_lay.addWidget(self._btn_ir_banco)
-        acoes_lay.addStretch()
-        lay.addLayout(acoes_lay)
-
-        lay.addWidget(btn_row(btn_nova, btn_voltar))
-
         return w
 
     # =========================================================================
@@ -1734,6 +1702,15 @@ class PageInstalarFirebird(QWidget):
 
     def _go_step(self, idx: int):
         self._stack.setCurrentIndex(idx)
+
+    def _on_back_clicked(self):
+        # Se estiver na aba de instalação e no passo de resultado ou execução, volta pro início da instalação
+        if self._tabs.currentIndex() == 0:
+            if self._stack.currentIndex() != self._IDX_CONFIG:
+                self._go_step(self._IDX_CONFIG)
+                return
+        
+        self.go_menu.emit()
 
     def _ir_para_banco(self):
         self._tabs.setCurrentIndex(2)   # aba Banco de Dados

@@ -23,7 +23,7 @@ import datetime
 import platform
 import os
 from ui.widgets import (
-    PageTitle, SectionHeader, AlertBox, ResultBox,
+    PageHeader, SectionHeader, AlertBox, ResultBox,
     LogConsole, ProgressBlock, StepIndicator,
     MiniFileItem, DestPanel, make_primary_btn, make_secondary_btn,
     btn_row, spacer, label
@@ -48,20 +48,30 @@ class PageAtalhos(QWidget):
         self._worker: AtalhosWorker | None   = None
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(40, 36, 40, 36)
+        root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
+
+        self._header = PageHeader("ATALHOS", "Puxar Atalhos via Rede")
+        self._header.back_clicked.connect(self._on_back_clicked)
+        root.addWidget(self._header)
+
+        # Container para o conteúdo original
+        content_w = QWidget()
+        content_lay = QVBoxLayout(content_w)
+        content_lay.setContentsMargins(40, 24, 40, 36)
+        content_lay.setSpacing(0)
 
         self._search_text = ""
 
-        root.addWidget(PageTitle("ATALHOS", "Puxar Atalhos via Rede"))
 
         self._step_ind = StepIndicator(STEP_NAMES)
-        root.addWidget(self._step_ind)
-        root.addWidget(spacer(h=12))
+        content_lay.addWidget(self._step_ind)
+        content_lay.addWidget(spacer(h=12))
 
         self._stack = QStackedWidget()
         self._stack.setStyleSheet("background: transparent;")
-        root.addWidget(self._stack)
+        content_lay.addWidget(self._stack)
+        root.addWidget(content_w, 1)
 
         self._stack.addWidget(self._build_step1())  # 0 — Aplicativos
         self._stack.addWidget(self._build_step2())  # 1 — Destino
@@ -146,14 +156,7 @@ class PageAtalhos(QWidget):
         scroll.setWidget(self._files_container)
         lay.addWidget(scroll, 1)  # stretch=1 — ocupa todo espaço restante
 
-        # Botões fixos no rodapé
-        btn_proximo = make_primary_btn("▶  PRÓXIMO", 160)
-        btn_proximo.clicked.connect(self._confirm_apps)
-        btn_voltar = make_secondary_btn("← VOLTAR", 120)
-        btn_voltar.clicked.connect(self.go_menu.emit)
-
-        lay.addWidget(spacer(h=16))
-        lay.addWidget(btn_row(btn_proximo, btn_voltar))
+        lay.addWidget(btn_row(btn_proximo))
         return w
 
     # ── STEP 2: Destino ───────────────────────────────────────────────────────
@@ -202,12 +205,7 @@ class PageAtalhos(QWidget):
         lay.addWidget(self._dest_panel)
         lay.addWidget(spacer(h=16))
 
-        btn_criar = make_primary_btn("▶  CRIAR ATALHOS", 180)
-        btn_criar.clicked.connect(self._run)
-        btn_voltar = make_secondary_btn("← VOLTAR", 120)
-        btn_voltar.clicked.connect(lambda: self._go_step(0))
-
-        lay.addWidget(btn_row(btn_criar, btn_voltar))
+        lay.addWidget(btn_row(btn_criar))
         lay.addStretch()
         return w
 
@@ -275,9 +273,6 @@ class PageAtalhos(QWidget):
             "campos":   rows,
         }
 
-        # ── Botões ──
-        btn_menu = make_primary_btn("← MENU PRINCIPAL", 200)
-        btn_menu.clicked.connect(self.go_menu.emit)
 
         if sucesso:
             btn_relatorio = make_secondary_btn("💾  Salvar Relatório", 180)
@@ -295,7 +290,7 @@ class PageAtalhos(QWidget):
 
         self._done_lay.addWidget(ResultBox(titulo, rows, kind))
         self._done_lay.addWidget(spacer(h=8))
-        self._done_lay.addWidget(btn_row(btn_menu, *([btn_relatorio] if btn_relatorio else []), *([btn_retry] if btn_retry else [])))
+        self._done_lay.addWidget(btn_row(*([btn_relatorio] if btn_relatorio else []), *([btn_retry] if btn_retry else [])))
         self._done_lay.addStretch()
 
     def _exportar_relatorio(self, dados: dict):
@@ -459,6 +454,13 @@ class PageAtalhos(QWidget):
     def _go_step(self, idx: int):
         self._stack.setCurrentIndex(idx)
         self._step_ind.set_step(idx)
+
+    def _on_back_clicked(self):
+        idx = self._stack.currentIndex()
+        if idx in (1, 2): # Destino ou Executando
+            self._go_step(0)
+        else:
+            self.go_menu.emit()
 
     # ── TECLADO ───────────────────────────────────────────────────────────────
 

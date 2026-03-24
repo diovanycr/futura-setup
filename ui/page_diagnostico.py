@@ -18,7 +18,7 @@ from PyQt6.QtGui import QFont
 from ui.theme import COLORS, FONT_SANS, FONT_MONO
 from ui.theme_manager import theme_manager
 from ui.widgets import (
-    PageTitle, SectionHeader, AlertBox, make_primary_btn, make_secondary_btn,
+    PageHeader, SectionHeader, AlertBox, make_primary_btn, make_secondary_btn,
     btn_row, spacer, h_line, label, BusyOverlay,
 )
 from core.diagnostico import DiagnosticoWorker, DiagItem
@@ -114,14 +114,23 @@ class PageDiagnostico(QWidget):
         self._alvo   = ""
         self._cards: list[_DiagCard] = []
 
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(40, 36, 40, 36)
-        lay.setSpacing(0)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        lay.addWidget(PageTitle("DIAGNÓSTICO", "Conectividade com Servidor"))
+        self._header = PageHeader("DIAGNÓSTICO", "Conectividade com Servidor")
+        self._header.back_clicked.connect(self.go_menu.emit)
+        root.addWidget(self._header)
+
+        # Container para o conteúdo original
+        content_w = QWidget()
+        content_lay = QVBoxLayout(content_w)
+        content_lay.setContentsMargins(40, 20, 40, 20)
+        content_lay.setSpacing(8)
 
         self._stack = QStackedWidget()
-        lay.addWidget(self._stack)
+        content_lay.addWidget(self._stack)
+        root.addWidget(content_w, 1)
 
         self._stack.addWidget(self._build_config())
         self._stack.addWidget(self._build_running())
@@ -177,9 +186,7 @@ class PageDiagnostico(QWidget):
 
         btn_iniciar = make_primary_btn("🔍  INICIAR DIAGNÓSTICO", 160)
         btn_iniciar.clicked.connect(self._iniciar)
-        btn_voltar = make_secondary_btn("← VOLTAR", 80)
-        btn_voltar.clicked.connect(self.go_menu.emit)
-        lay.addWidget(btn_row(btn_iniciar, btn_voltar))
+        lay.addWidget(btn_row(btn_iniciar))
 
         lay.addStretch()
 
@@ -244,9 +251,7 @@ class PageDiagnostico(QWidget):
 
         btn_novo = make_secondary_btn("🔄  NOVO DIAGNÓSTICO", 160)
         btn_novo.clicked.connect(self._go_novo)
-        btn_voltar = make_secondary_btn("← VOLTAR", 80)
-        btn_voltar.clicked.connect(self.go_menu.emit)
-        lay.addWidget(btn_row(btn_novo, btn_voltar))
+        lay.addWidget(btn_row(btn_novo))
 
         lay.addStretch()
         return w

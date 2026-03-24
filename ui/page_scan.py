@@ -28,7 +28,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QPropertyAnimation, QEasingCurv
 from PyQt6.QtGui import QFont, QPainter, QColor, QBrush
 
 from ui.widgets import (
-    PageTitle, SectionHeader, AlertBox, LogConsole,
+    PageHeader, SectionHeader, AlertBox, LogConsole,
     ServerItem, spacer, LoadingSpinner, FadeStackedWidget,
     make_primary_btn, make_secondary_btn, btn_row
 )
@@ -286,14 +286,23 @@ class PageScan(QWidget):
         self._toggle_rows: list[MethodCard] = []
         self._scan_console = LogConsole()
 
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(40, 36, 40, 36)
-        lay.setSpacing(0)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        lay.addWidget(PageTitle("DESCOBERTA", "Escaneamento de Rede"))
+        self._header = PageHeader("DESCOBERTA", "Escaneamento de Rede")
+        self._header.back_clicked.connect(self._on_back_clicked)
+        root.addWidget(self._header)
+
+        # Container para o conteúdo original
+        content_w = QWidget()
+        content_lay = QVBoxLayout(content_w)
+        content_lay.setContentsMargins(40, 20, 40, 20)
+        content_lay.setSpacing(0)
 
         self._stack = FadeStackedWidget()
-        lay.addWidget(self._stack)
+        content_lay.addWidget(self._stack)
+        root.addWidget(content_w, 1)
 
         self._stack.addWidget(self._build_method_page())
         self._stack.addWidget(self._build_scanning_page())
@@ -346,10 +355,7 @@ class PageScan(QWidget):
         self._btn_scan = make_primary_btn("▶  INICIAR ESCANEAMENTO", 240)
         self._btn_scan.clicked.connect(self._start_scan)
 
-        self._btn_cancel = make_secondary_btn("CANCELAR", 130)
-        self._btn_cancel.clicked.connect(self.cancelado.emit)
-
-        lay.addWidget(btn_row(self._btn_scan, self._btn_cancel))
+        lay.addWidget(btn_row(self._btn_scan))
 
         lay.addWidget(spacer(h=8))
 
@@ -442,12 +448,8 @@ class PageScan(QWidget):
         status_lay.addWidget(self._status_lbl)
         status_lay.addWidget(self._status_sub)
 
-        btn_stop = make_secondary_btn("✕  INTERROMPER", 160)
-        btn_stop.clicked.connect(self._stop_scan)
-
         lay.addWidget(status_box)
         lay.addWidget(self._scan_console)
-        lay.addWidget(btn_row(btn_stop))
         lay.addStretch()
 
         return w
@@ -481,10 +483,7 @@ class PageScan(QWidget):
         self._btn_usar = make_primary_btn("USAR SERVIDOR SELECIONADO", 240)
         self._btn_usar.clicked.connect(self._confirm_server)
 
-        btn_novo = make_secondary_btn("← NOVO ESCANEAMENTO", 180)
-        btn_novo.clicked.connect(lambda: self._stack.setCurrentIndex(0))
-
-        lay.addWidget(btn_row(self._btn_usar, btn_novo))
+        lay.addWidget(btn_row(self._btn_usar))
         return w
 
     # ── AÇÕES ─────────────────────────────────────────────────────────────────
@@ -496,6 +495,11 @@ class PageScan(QWidget):
         self._radar.stop()
         self._build_hist_section()
         self._stack.setCurrentIndex(0)
+
+    def _on_back_clicked(self):
+        if self._worker and self._worker.isRunning():
+            self._stop_scan()
+        self.cancelado.emit()
 
     def _start_scan(self):
         if self._worker and self._worker.isRunning():

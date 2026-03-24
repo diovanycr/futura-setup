@@ -2,11 +2,14 @@
 # FUTURA SETUP — Página: Utilitários
 # =============================================================================
 
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
-from PyQt6.QtCore import pyqtSignal, Qt
-from PyQt6.QtGui import QFont
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+    QGraphicsDropShadowEffect
+)
+from PyQt6.QtCore import pyqtSignal, Qt, QPropertyAnimation, QEasingCurve, pyqtProperty
+from PyQt6.QtGui import QFont, QColor
 
-from ui.widgets import PageTitle, spacer
+from ui.widgets import PageHeader, spacer
 from ui.theme import COLORS, FONT_SANS
 from ui.theme_manager import theme_manager
 
@@ -19,8 +22,19 @@ class ActionButton(QWidget):
         super().__init__(parent)
         self._accent = accent
         self._state  = "normal"
+        self._glow   = 0
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedHeight(76)
+
+        self._anim = QPropertyAnimation(self, b"glow")
+        self._anim.setDuration(300)
+        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        self._shadow = QGraphicsDropShadowEffect(self)
+        self._shadow.setBlurRadius(0)
+        self._shadow.setOffset(0, 0)
+        self._shadow.setColor(QColor(accent))
+        self.setGraphicsEffect(self._shadow)
 
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 16, 0)
@@ -67,6 +81,16 @@ class ActionButton(QWidget):
         self._upd()
         theme_manager.theme_changed.connect(self._upd)
 
+    @pyqtProperty(int)
+    def glow(self):
+        return self._glow
+
+    @glow.setter
+    def glow(self, val):
+        self._glow = val
+        self._shadow.setBlurRadius(val * 0.25)
+        self._upd()
+
     def _upd(self, _mode: str = ""):
         if self._state == "hover":
             bg, border = COLORS["accent_dim"], self._accent
@@ -110,10 +134,16 @@ class ActionButton(QWidget):
 
     def enterEvent(self, e):
         self._state = "hover"
+        self._anim.stop()
+        self._anim.setEndValue(100)
+        self._anim.start()
         self._upd()
 
     def leaveEvent(self, e):
         self._state = "normal"
+        self._anim.stop()
+        self._anim.setEndValue(0)
+        self._anim.start()
         self._upd()
 
     def mousePressEvent(self, e):
@@ -142,11 +172,19 @@ class PageUtilitarios(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(40, 36, 40, 36)
-        lay.setSpacing(0)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        lay.addWidget(PageTitle("UTILITARIOS", "Ferramentas auxiliares do sistema"))
+        self._header = PageHeader("UTILITARIOS", "Ferramentas auxiliares do sistema")
+        self._header.back_clicked.connect(self.go_menu.emit)
+        root.addWidget(self._header)
+
+        # Container para o conteúdo original
+        content_w = QWidget()
+        content_lay = QVBoxLayout(content_w)
+        content_lay.setContentsMargins(40, 24, 40, 36)
+        content_lay.setSpacing(0)
 
         btn_lay = QVBoxLayout()
         btn_lay.setSpacing(12)
@@ -184,5 +222,7 @@ class PageUtilitarios(QWidget):
             btn.clicked.connect(sig.emit)
             btn_lay.addWidget(btn)
 
-        lay.addLayout(btn_lay)
-        lay.addStretch()
+        content_lay.addLayout(btn_lay)
+        content_lay.addStretch()
+
+        root.addWidget(content_w, 1)

@@ -26,7 +26,7 @@ from PyQt6.QtWidgets import (
 from ui.theme         import COLORS, FONT_SANS, FONT_MONO
 from ui.theme_manager import theme_manager
 from ui.widgets       import (
-    PageTitle, SectionHeader, AlertBox,
+    PageHeader, SectionHeader, AlertBox,
     make_primary_btn, make_secondary_btn, make_folder_btn,
     btn_row, spacer, h_line, label, BusyOverlay,
 )
@@ -1254,32 +1254,12 @@ class PageVerificarVersaoFdb(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        header = QWidget()
-        header.setObjectName("page_header")
-        h_lay = QHBoxLayout(header)
-        h_lay.setContentsMargins(24, 20, 24, 12)
-        h_lay.setSpacing(0)
-
-        title_block = QWidget()
-        title_block.setStyleSheet("background: transparent;")
-        tb_lay = QVBoxLayout(title_block)
-        tb_lay.setContentsMargins(0, 0, 0, 0)
-        tb_lay.setSpacing(2)
-
-        lbl_title = QLabel("VERIFICAR VERSAO / DOWNLOAD")
-        lbl_title.setFont(QFont(FONT_SANS, 15, QFont.Weight.Bold))
-        lbl_sub = QLabel("Detecta versao do .fdb e baixa atualizacoes do site Futura")
-        lbl_sub.setFont(QFont(FONT_SANS, 10))
-
-        tb_lay.addWidget(lbl_title)
-        tb_lay.addWidget(lbl_sub)
-        h_lay.addWidget(title_block, 1)
-
-        btn_voltar = make_secondary_btn("VOLTAR", 80)
-        btn_voltar.clicked.connect(self.go_menu.emit)
-        h_lay.addWidget(btn_voltar)
-
-        root.addWidget(header)
+        self._header = PageHeader(
+            "VERIFICAR VERSÃO / DOWNLOAD",
+            "Detecta versão do .fdb e baixa atualizações do site Futura"
+        )
+        self._header.back_clicked.connect(self.go_menu.emit)
+        root.addWidget(self._header)
 
         self._tabs = QTabWidget()
         self._tabs.setDocumentMode(True)

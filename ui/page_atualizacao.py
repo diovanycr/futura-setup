@@ -17,7 +17,7 @@ from PyQt6.QtCore import pyqtSignal, Qt, QThread
 from PyQt6.QtGui import QFont
 
 from ui.widgets import (
-    PageTitle, SectionHeader, AlertBox, ResultBox,
+    PageHeader, SectionHeader, AlertBox, ResultBox,
     ProgressBlock, LogConsole, StepIndicator, RadioRow,
     make_primary_btn, make_secondary_btn, btn_row, spacer, label, ConfirmDialog,
 )
@@ -195,15 +195,15 @@ class PageAtualizacao(QWidget):
         lay.setContentsMargins(40, 36, 40, 36)
         lay.setSpacing(0)
 
-        lay.addWidget(PageTitle("ATUALIZAR", "Atualização Completa do Sistema"))
 
         self._step_ind = StepIndicator(STEP_NAMES)
-        lay.addWidget(self._step_ind)
-        lay.addWidget(spacer(h=12))
+        content_lay.addWidget(self._step_ind)
+        content_lay.addWidget(spacer(h=12))
 
         self._stack = QStackedWidget()
         self._stack.setStyleSheet("background: transparent;")
-        lay.addWidget(self._stack)
+        content_lay.addWidget(self._stack)
+        root.addWidget(content_w, 1)
 
         self._stack.addWidget(self._build_step1())
         self._stack.addWidget(self._build_step2())
@@ -269,9 +269,7 @@ class PageAtualizacao(QWidget):
         btn_detectar.clicked.connect(self._detectar_pastas)
         btn_proximo = make_primary_btn("▶  PRÓXIMO", 160)
         btn_proximo.clicked.connect(self._confirm_pasta)
-        btn_voltar = make_secondary_btn("← VOLTAR", 120)
-        btn_voltar.clicked.connect(self.go_menu.emit)
-        lay.addWidget(btn_row(btn_detectar, btn_proximo, btn_voltar))
+        lay.addWidget(btn_row(btn_detectar, btn_proximo))
 
         lay.addStretch()
         return w
@@ -362,9 +360,7 @@ class PageAtualizacao(QWidget):
 
         btn_proximo = make_primary_btn("▶  PRÓXIMO", 160)
         btn_proximo.clicked.connect(self._confirm_banco)
-        btn_voltar = make_secondary_btn("← VOLTAR", 120)
-        btn_voltar.clicked.connect(lambda: self._go_step(0))
-        lay.addWidget(btn_row(btn_proximo, btn_voltar))
+        lay.addWidget(btn_row(btn_proximo))
 
         lay.addStretch()
         return w
@@ -491,9 +487,7 @@ class PageAtualizacao(QWidget):
 
         btn_confirmar = make_primary_btn("✓  CONFIRMAR E ATUALIZAR", 220)
         btn_confirmar.clicked.connect(self._confirmar_atualizacao)
-        btn_voltar = make_secondary_btn("← VOLTAR", 120)
-        btn_voltar.clicked.connect(lambda: self._go_step(1))
-        lay.addWidget(btn_row(btn_confirmar, btn_voltar))
+        lay.addWidget(btn_row(btn_confirmar))
 
         lay.addStretch()
         theme_manager.theme_changed.connect(self._refresh_resumo_style)
@@ -573,9 +567,7 @@ class PageAtualizacao(QWidget):
         self._done_lay.addWidget(ResultBox(titulo, rows, kind))
         self._done_lay.addWidget(spacer(h=8))
 
-        btn_menu = make_primary_btn("← MENU PRINCIPAL", 200)
-        btn_menu.clicked.connect(self.go_menu.emit)
-        btns = [btn_menu]
+        btns = []
         if not sucesso:
             btn_retry = make_primary_btn("↺  TENTAR NOVAMENTE", 200)
             btn_retry.clicked.connect(self.reset)
@@ -639,6 +631,20 @@ class PageAtualizacao(QWidget):
     def _go_step(self, idx: int):
         self._stack.setCurrentIndex(idx)
         self._step_ind.set_step(idx)
+
+    def _on_back_clicked(self):
+        idx = self._stack.currentIndex()
+        back_map = {
+            0: self.go_menu.emit,
+            1: lambda: self._go_step(0),
+            2: lambda: self._go_step(1),
+            3: self.go_menu.emit,
+            4: self.go_menu.emit,
+        }
+        action = back_map.get(idx)
+        if action:
+            if callable(action): action()
+            else: action.emit()
 
     # ── TECLADO ───────────────────────────────────────────────────────────────
 

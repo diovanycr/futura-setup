@@ -26,7 +26,7 @@ from PyQt6.QtGui import QFont
 from ui.theme import COLORS, FONT_SANS, FONT_MONO
 from ui.theme_manager import theme_manager
 from ui.widgets import (
-    PageTitle, SectionHeader, AlertBox, LogConsole,
+    PageHeader, SectionHeader, AlertBox, LogConsole,
     ProgressBlock, ResultBox, make_primary_btn, make_secondary_btn,
     btn_row, spacer, h_line, label, ConfirmDialog,
 )
@@ -720,9 +720,7 @@ class _StepResultado(QWidget):
         lay.addWidget(h_line())
         btn_novo = make_secondary_btn("NOVA OPERAÇÃO", 160)
         btn_novo.clicked.connect(self.go_config.emit)
-        btn_voltar = make_secondary_btn("VOLTAR", 120)
-        btn_voltar.clicked.connect(self.go_menu.emit)
-        lay.addWidget(btn_row(btn_novo, btn_voltar))
+        lay.addWidget(btn_row(btn_novo))
 
         theme_manager.theme_changed.connect(self._upd)
         self._upd()
@@ -776,10 +774,18 @@ class PagePortOpener(QWidget):
         self._action = "add"
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(24, 10, 24, 10)   # ← margens compactadas
-        root.setSpacing(6)                          # ← compactado
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        root.addWidget(PageTitle("", "Firewall — Abrir / Remover Portas"))  # ← "07" removido
+        self._header = PageHeader("ABERTURA DE PORTAS", "Firewall — Abrir / Remover Portas")
+        self._header.back_clicked.connect(self._on_back_clicked)
+        root.addWidget(self._header)
+
+        # Container para o conteúdo original
+        content_w = QWidget()
+        content_lay = QVBoxLayout(content_w)
+        content_lay.setContentsMargins(24, 20, 24, 20)
+        content_lay.setSpacing(6)
 
         self._stack = QStackedWidget()
         self._cfg   = _StepConfig()
@@ -790,7 +796,8 @@ class PagePortOpener(QWidget):
         self._stack.addWidget(self._exec)  # 1
         self._stack.addWidget(self._res)   # 2
 
-        root.addWidget(self._stack, 1)
+        content_lay.addWidget(self._stack)
+        root.addWidget(content_w, 1)
 
         # Conexões
         self._cfg.go_abrir.connect(lambda: self._iniciar("add"))
@@ -798,8 +805,13 @@ class PagePortOpener(QWidget):
 
         self._exec.finished.connect(self._on_finished)
 
-        self._res.go_menu.connect(self.go_menu)
+        self._res.go_menu.connect(self._on_back_clicked)
         self._res.go_config.connect(lambda: self._stack.setCurrentIndex(self._IDX_CONFIG))
+
+    def _on_back_clicked(self):
+        if self._worker:
+            self._worker.stop()
+        self.go_menu.emit()
 
     # ------------------------------------------------------------------
     def reset(self):

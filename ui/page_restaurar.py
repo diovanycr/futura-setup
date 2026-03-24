@@ -17,7 +17,7 @@ from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtGui import QFont
 
 from ui.widgets import (
-    PageTitle, SectionHeader, AlertBox, ResultBox,
+    PageHeader, SectionHeader, AlertBox, ResultBox,
     ProgressBlock, LogConsole, make_primary_btn, make_secondary_btn,
     btn_row, spacer, label
 )
@@ -252,14 +252,23 @@ class PageRestaurar(QWidget):
         self._pasta_atual: str                 = ""
         self._worker: RestauracaoWorker | None = None
 
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(40, 36, 40, 36)
-        lay.setSpacing(0)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        lay.addWidget(PageTitle("MODO 04", "Restaurar Backup"))
+        self._header = PageHeader("RESTAURAR", "Restauração de Backup")
+        self._header.back_clicked.connect(self._on_back_clicked)
+        root.addWidget(self._header)
+
+        # Container para o conteúdo original
+        content_w = QWidget()
+        content_lay = QVBoxLayout(content_w)
+        content_lay.setContentsMargins(40, 24, 40, 36)
+        content_lay.setSpacing(0)
 
         self._stack = QStackedWidget()
-        lay.addWidget(self._stack)
+        content_lay.addWidget(self._stack)
+        root.addWidget(content_w, 1)
 
         self._stack.addWidget(self._build_list_page())     # 0
         self._stack.addWidget(self._build_confirm_page())  # 1
@@ -322,10 +331,7 @@ class PageRestaurar(QWidget):
         self._btn_restaurar = make_primary_btn("↺  RESTAURAR SELECIONADO", 240)
         self._btn_restaurar.clicked.connect(self._confirm)
         self._btn_restaurar.setEnabled(False)
-        btn_voltar = make_secondary_btn("← VOLTAR", 120)
-        btn_voltar.clicked.connect(self.go_menu.emit)
-
-        footer_lay.addWidget(btn_row(self._btn_restaurar, btn_voltar))
+        footer_lay.addWidget(btn_row(self._btn_restaurar))
         root_lay.addWidget(footer, 0)
         return root
 
@@ -384,12 +390,7 @@ class PageRestaurar(QWidget):
         lay.addWidget(self._confirm_box_w)
         lay.addWidget(spacer(h=8))
 
-        btn_ok   = make_primary_btn("✓  CONFIRMAR RESTAURAÇÃO", 250)
-        btn_ok.clicked.connect(self._run_restore)
-        btn_back = make_secondary_btn("← VOLTAR", 120)
-        btn_back.clicked.connect(lambda: self._stack.setCurrentIndex(0))
-
-        lay.addWidget(btn_row(btn_ok, btn_back))
+        lay.addWidget(btn_row(btn_ok))
         lay.addStretch()
         return w
 
@@ -583,11 +584,18 @@ class PageRestaurar(QWidget):
             ("Erros",    str(resumo.get("erros", 0))),
         ]
         box = ResultBox(titulo, rows, kind)
-        btn = make_primary_btn("← MENU PRINCIPAL", 200)
+        btn = None # Redundant
         btn.clicked.connect(self.go_menu.emit)
 
         self._done_lay.addWidget(box)
         self._done_lay.addWidget(spacer(h=8))
-        self._done_lay.addWidget(btn_row(btn))
+        # No button row needed if menu button is removed
         self._done_lay.addStretch()
         self._stack.setCurrentIndex(3)
+
+    def _on_back_clicked(self):
+        idx = self._stack.currentIndex()
+        if idx == 1: # Confirmar
+            self._stack.setCurrentIndex(0)
+        else:
+            self.go_menu.emit()

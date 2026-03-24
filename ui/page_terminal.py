@@ -28,7 +28,7 @@ from PyQt6.QtGui import QFont, QIcon, QPixmap, QPainter, QColor
 from PyQt6.QtSvg import QSvgRenderer
 
 from ui.widgets import (
-    PageTitle, SectionHeader, AlertBox, ResultBox, ProgressBlock,
+    PageHeader, SectionHeader, AlertBox, ResultBox, ProgressBlock,
     LogConsole, StepIndicator, MiniFileItem, DestPanel, RadioRow,
     CustomPathCard, ProcessCard, FadeStackedWidget, make_primary_btn,
     make_secondary_btn, btn_row, spacer, label, card_style
@@ -59,20 +59,30 @@ class PageTerminal(QWidget):
         self._worker: InstalacaoWorker | None = None
         self._processos: list[dict]           = []
 
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(40, 36, 40, 36)
-        lay.setSpacing(0)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        lay.addWidget(PageTitle("TERMINAL", "Novo Terminal"))
+        self._header = PageHeader("TERMINAL", "Instalação de Novo Terminal")
+        self._header.back_clicked.connect(self._on_back_clicked)
+        root.addWidget(self._header)
+
+        # Container para o conteúdo original
+        content_w = QWidget()
+        content_lay = QVBoxLayout(content_w)
+        content_lay.setContentsMargins(40, 24, 40, 36)
+        content_lay.setSpacing(0)
+
         self._search_text = ""
 
         self._step_ind = StepIndicator(STEP_NAMES)
-        lay.addWidget(self._step_ind)
-        lay.addWidget(spacer(h=12))
+        content_lay.addWidget(self._step_ind)
+        content_lay.addWidget(spacer(h=12))
 
         self._stack = FadeStackedWidget()
         self._stack.setStyleSheet("background: transparent;")
-        lay.addWidget(self._stack)
+        content_lay.addWidget(self._stack)
+        root.addWidget(content_w, 1)
 
         self._stack.addWidget(self._build_step1())  # 0 — Pasta
         self._stack.addWidget(self._build_step2())  # 1 — Resumo
@@ -124,10 +134,8 @@ class PageTerminal(QWidget):
         # Botões
         btn_proximo = make_primary_btn("▶  PRÓXIMO", 180)
         btn_proximo.clicked.connect(self._confirm_pasta)
-        btn_voltar = make_secondary_btn("← VOLTAR", 120)
-        btn_voltar.clicked.connect(self.go_menu.emit)
 
-        lay.addWidget(btn_row(btn_proximo, btn_voltar))
+        lay.addWidget(btn_row(btn_proximo))
         lay.addStretch()
         return w
 
@@ -208,12 +216,7 @@ class PageTerminal(QWidget):
         lay.addWidget(spacer(h=16))
 
         # Botões
-        btn_proximo = make_primary_btn("▶  INICIAR INSTALAÇÃO", 220)
-        btn_proximo.clicked.connect(lambda: self._go_step(2))
-        btn_voltar = make_secondary_btn("← VOLTAR", 120)
-        btn_voltar.clicked.connect(lambda: self._go_step(0))
-
-        lay.addWidget(btn_row(btn_proximo, btn_voltar))
+        lay.addWidget(btn_row(btn_proximo))
         lay.addStretch()
 
         return w
@@ -256,11 +259,7 @@ class PageTerminal(QWidget):
             self._step3_lay.addWidget(box)
             self._step3_lay.addWidget(spacer(h=16))
 
-            btn_proximo = make_primary_btn("▶  PRÓXIMO", 180)
-            btn_proximo.clicked.connect(lambda: self._go_step(3))
-            btn_voltar = make_secondary_btn("← VOLTAR", 120)
-            btn_voltar.clicked.connect(lambda: self._go_step(1))
-            self._step3_lay.addWidget(btn_row(btn_proximo, btn_voltar))
+            self._step3_lay.addWidget(btn_row(btn_proximo))
         else:
             alert = AlertBox(
                 f"{len(self._processos)} processo(s) em execução na pasta de destino. "
@@ -280,11 +279,7 @@ class PageTerminal(QWidget):
 
             self._step3_lay.addWidget(spacer(h=16))
 
-            btn_encerrar = make_primary_btn("⊗  ENCERRAR E CONTINUAR", 220)
-            btn_encerrar.clicked.connect(self._encerrar_e_continuar)
-            btn_voltar = make_secondary_btn("← VOLTAR", 120)
-            btn_voltar.clicked.connect(lambda: self._go_step(1))
-            self._step3_lay.addWidget(btn_row(btn_encerrar, btn_voltar))
+            self._step3_lay.addWidget(btn_row(btn_encerrar))
 
         self._step3_lay.addStretch()
 
@@ -375,11 +370,7 @@ class PageTerminal(QWidget):
         lay.addWidget(self._dest_panel)
         lay.addWidget(spacer(h=15))
 
-        btn_copiar = make_primary_btn("▶  COPIAR ARQUIVOS", 200)
-        btn_copiar.clicked.connect(self._start_install)
-        btn_voltar = make_secondary_btn("← VOLTAR", 120)
-        btn_voltar.clicked.connect(lambda: self._go_step(2))
-        lay.addWidget(btn_row(btn_copiar, btn_voltar))
+        lay.addWidget(btn_row(btn_copiar))
 
         # Removido stretch final para evitar compressão dos itens superiores
         return w
@@ -522,10 +513,8 @@ class PageTerminal(QWidget):
             "campos":  rows,
         }
 
-        btn_menu = make_primary_btn("← MENU PRINCIPAL", 200)
-        btn_menu.clicked.connect(self.go_menu.emit)
 
-        btns = [btn_menu]
+        btns = []
         if sucesso:
             btn_rel = make_secondary_btn("💾  SALVAR RELATÓRIO", 180)
             btn_rel.clicked.connect(lambda: self._exportar_relatorio(self._ultimo_relatorio))
@@ -650,6 +639,21 @@ class PageTerminal(QWidget):
             self._check_processos()
         elif idx == 3:
             self._load_files()
+
+    def _on_back_clicked(self):
+        idx = self._stack.currentIndex()
+        back_map = {
+            0: self.go_menu.emit,
+            1: lambda: self._go_step(0),
+            2: lambda: self._go_step(1),
+            3: lambda: self._go_step(1),
+            4: lambda: self._go_step(2),
+            5: self.go_menu.emit,
+        }
+        action = back_map.get(idx)
+        if action:
+            if callable(action): action()
+            else: action.emit()
 
     # ── TECLADO ───────────────────────────────────────────────────────────────
 

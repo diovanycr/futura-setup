@@ -30,7 +30,7 @@ from PyQt6.QtWidgets import (
 from ui.theme import COLORS, FONT_SANS, FONT_MONO
 from ui.theme_manager import theme_manager
 from ui.widgets import (
-    PageTitle, SectionHeader, AlertBox, ResultBox,
+    PageHeader, SectionHeader, AlertBox, ResultBox,
     make_primary_btn, make_secondary_btn, make_folder_btn, btn_row,
     h_line, label, spacer,
     ProgressBlock, BusyOverlay,
@@ -998,11 +998,7 @@ class _StepConfirmacao(QWidget):
         lay.addWidget(h_line())
 
         self._btn_confirmar = make_primary_btn("CONFIRMAR E SALVAR", 160)
-        self._btn_voltar    = make_secondary_btn("VOLTAR", 80)
-        self._btn_confirmar.clicked.connect(self._on_confirmar)
-        self._btn_voltar.clicked.connect(self.voltar.emit)
-
-        lay.addWidget(btn_row(self._btn_voltar, self._btn_confirmar))
+        lay.addWidget(btn_row(self._btn_confirmar))
 
     def carregar(self, dados: dict, novo_pis: str):
         self._painel.carregar(dados, novo_pis)
@@ -1021,7 +1017,6 @@ class _StepConfirmacao(QWidget):
 
     def reabilitar(self):
         self._btn_confirmar.setEnabled(True)
-        self._btn_voltar.setEnabled(True)
 
 
 # ---------------------------------------------------------------------------
@@ -1048,11 +1043,7 @@ class _StepResultado(QWidget):
         lay.addWidget(h_line())
 
         self._btn_nova  = make_primary_btn("NOVA EDIÇÃO", 180)
-        self._btn_menu  = make_secondary_btn("MENU PRINCIPAL", 180)
-        self._btn_nova.clicked.connect(self.nova_edicao.emit)
-        self._btn_menu.clicked.connect(self.go_menu.emit)
-
-        lay.addWidget(btn_row(self._btn_nova, self._btn_menu))
+        lay.addWidget(btn_row(self._btn_nova))
 
     def set_resultado(self, sucesso: bool, fk_cadastro: str, novo_pis: str, erro: str = ""):
         lay = self.layout()
@@ -1111,10 +1102,18 @@ class PageEditarFuncionario(QWidget):
         self._database: str            = _DEFAULT_DATABASE
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(28, 24, 28, 14)
-        root.setSpacing(3)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        root.addWidget(PageTitle("", "Editar Cadastro de Funcionário"))
+        self._header = PageHeader("EDITAR FUNCIONÁRIO", "Editar Cadastro de Funcionário")
+        self._header.back_clicked.connect(self._on_back_clicked)
+        root.addWidget(self._header)
+
+        # Container para o conteúdo original
+        content_w = QWidget()
+        content_lay = QVBoxLayout(content_w)
+        content_lay.setContentsMargins(28, 24, 28, 14)
+        content_lay.setSpacing(3)
 
         self._stack = QStackedWidget()
 
@@ -1126,15 +1125,20 @@ class PageEditarFuncionario(QWidget):
         self._stack.addWidget(self._confirm)  # 1
         self._stack.addWidget(self._result)   # 2
 
-        root.addWidget(self._stack, 1)
+        content_lay.addWidget(self._stack)
+        root.addWidget(content_w, 1)
         self._overlay = BusyOverlay(self)
 
         # Conexoes
         self._form.buscar.connect(self._on_buscar)
         self._confirm.confirmar.connect(self._on_confirmar)
-        self._confirm.voltar.connect(self._go_form)
-        self._result.go_menu.connect(self.go_menu.emit)
         self._result.nova_edicao.connect(self._go_form)
+
+    def _on_back_clicked(self):
+        if self._stack.currentIndex() > 0:
+            self._go_form()
+        else:
+            self.go_menu.emit()
 
     # ── Navegacao interna ────────────────────────────────────────────────────
 

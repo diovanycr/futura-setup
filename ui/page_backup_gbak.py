@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import (
 from ui.theme import COLORS, FONT_SANS, FONT_MONO
 from ui.theme_manager import theme_manager
 from ui.widgets import (
-    PageTitle, SectionHeader, AlertBox, LogConsole,
+    PageHeader, SectionHeader, AlertBox, LogConsole,
     ProgressBlock, ResultBox, make_primary_btn, make_secondary_btn,
     make_folder_btn, btn_row, spacer, h_line, label, ConfirmDialog,
 )
@@ -718,10 +718,18 @@ class PageBackupGbak(QWidget):
         self._operacao_atual = ""
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(40, 36, 40, 20)
-        root.setSpacing(8)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        root.addWidget(PageTitle("", "Backup / Restaure de Banco de Dados"))
+        self._header = PageHeader("BACKUP / RESTAURE", "Geração e restauração de backups via GBAK")
+        self._header.back_clicked.connect(self.go_menu.emit)
+        root.addWidget(self._header)
+
+        # Container para o conteúdo original
+        content_w = QWidget()
+        content_lay = QVBoxLayout(content_w)
+        content_lay.setContentsMargins(40, 20, 40, 20)
+        content_lay.setSpacing(8)
 
         self._stack = QStackedWidget()
 
@@ -735,7 +743,8 @@ class PageBackupGbak(QWidget):
         self._stack.addWidget(self._rst)        # idx 2
         self._stack.addWidget(self._resultado)  # idx 3
 
-        root.addWidget(self._stack, 1)
+        content_lay.addWidget(self._stack)
+        root.addWidget(content_w, 1)
 
         # Conexoes
         self._cfg.go_backup.connect(self._iniciar_backup)

@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import (
 from ui.theme         import COLORS, FONT_SANS, FONT_MONO
 from ui.theme_manager import theme_manager
 from ui.widgets       import (
-    PageTitle, SectionHeader, AlertBox, LogConsole,
+    PageHeader, SectionHeader, AlertBox, LogConsole,
     make_primary_btn, make_secondary_btn,
     btn_row, spacer, h_line, label,
     _apply_primary_style, _apply_secondary_style,
@@ -1731,22 +1731,28 @@ class PageFbPortable(QWidget):
     # =========================================================================
 
     def _build_ui(self):
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(20, 16, 20, 12)
-        lay.setSpacing(8)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        # Título dinâmico baseado no tema
-        self._title_widget = PageTitle(
+        self._header = PageHeader(
             "FIREBIRD PORTABLE",
             "Instale, ative e configure FB3 e FB4 de forma independente"
         )
-        lay.addWidget(self._title_widget)
+        self._header.back_clicked.connect(self.go_menu.emit)
+        root.addWidget(self._header)
+
+        # Container para o conteúdo original
+        content_w = QWidget()
+        self._content_lay = QVBoxLayout(content_w)
+        self._content_lay.setContentsMargins(20, 16, 20, 12)
+        self._content_lay.setSpacing(8)
 
         def _upd_title():
             if theme_manager.ui_theme == "modern":
-                self._title_widget.set_subtitle("✨ Interface Premium - Configuração Avançada")
+                self._header.set_subtitle("✨ Interface Premium - Configuração Avançada")
             else:
-                self._title_widget.set_subtitle("Instale, ative e configure FB3 e FB4 de forma independente")
+                self._header.set_subtitle("Instale, ative e configure FB3 e FB4 de forma independente")
         
         theme_manager.ui_theme_changed.connect(_upd_title)
         _upd_title()
@@ -1755,14 +1761,14 @@ class PageFbPortable(QWidget):
         if not is_admin():
             self._banner_admin = _BannerAdmin()
             self._banner_admin.btn_reiniciar.clicked.connect(self._on_reiniciar_admin)
-            lay.addWidget(self._banner_admin)
+            self._content_lay.addWidget(self._banner_admin)
         else:
             self._banner_admin = None
 
         # -- ABAS ----------------------------------------------------------
         self._tabs = QTabWidget()
         self._tabs.setFont(QFont(FONT_SANS, 10))
-        lay.addWidget(self._tabs)
+        self._content_lay.addWidget(self._tabs)
 
         # -- ABA 1: Controle de versões ------------------------------------
         tab_controle = QWidget()
@@ -1956,7 +1962,7 @@ class PageFbPortable(QWidget):
 
         self._tabs.addTab(tab_log, "📜 Logs")
 
-        lay.addStretch()
+        self._content_lay.addStretch()
 
         self._upd_style()
         self._on_versao_changed("4")
