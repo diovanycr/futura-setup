@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QStackedWidget, QScrollArea, QGridLayout, QPushButton
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QPropertyAnimation, QEasingCurve, pyqtProperty
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QPropertyAnimation, QEasingCurve, pyqtProperty, QPointF
 from PyQt6.QtGui import QFont, QPainter, QColor, QBrush
 
 from ui.widgets import (
@@ -133,7 +133,7 @@ class RadarWidget(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         
-        center = self.rect().center()
+        center = QPointF(self.rect().center())
         color = QColor(COLORS["accent"])
         
         for r in self._rings:
@@ -143,7 +143,7 @@ class RadarWidget(QWidget):
             
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(QColor(color.red(), color.green(), color.blue(), alpha))
-            p.drawEllipse(center, size/2, size/2)
+            p.drawEllipse(center, size/2.0, size/2.0)
         
         # Core fixo
         p.setBrush(color)
