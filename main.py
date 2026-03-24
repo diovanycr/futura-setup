@@ -5,6 +5,7 @@
 import sys
 import os
 import subprocess
+import traceback
 
 # -- Patch para evitar janelas de console no Windows (PyInstaller) --
 if os.name == 'nt':
@@ -22,6 +23,7 @@ from ui.theme import get_stylesheet, set_theme
 from ui.theme_manager import theme_manager
 from ui.login_dialog import LoginDialog
 from ui.main_window import MainWindow
+from ui.crash_dialog import show_crash
 from core.logger import log
 
 # =============================================================================
@@ -78,7 +80,23 @@ def _force_taskbar_icon(window):
         pass
 
 
+def _exception_hook(exctype, value, tb):
+    """Captura exceções não tratadas e exibe o Crash Dialog."""
+    trace = "".join(traceback.format_exception(exctype, value, tb))
+    log.error(f"FATAL UNCAUGHT EXCEPTION: {exctype.__name__}: {value}")
+    log.error(trace)
+    log.flush()
+    
+    # Se o QApplication ainda não existe, criamos um temporário para o diálogo
+    if not QApplication.instance():
+        _temp_app = QApplication(sys.argv)
+        
+    show_crash(str(value), trace, str(log.log_dir))
+    sys.exit(1)
+
+
 def main():
+    sys.excepthook = _exception_hook
     app = QApplication(sys.argv)
     
     icon = _app_icon()

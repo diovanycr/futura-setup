@@ -172,6 +172,7 @@ class FuturaLogger:
         app_dir.mkdir(parents=True, exist_ok=True)
 
         self.log_path   = app_dir / "futura_setup.log"
+        self.log_dir    = app_dir
         self.prefs_path = app_dir / "prefs.json"
         self.prefs      = Prefs(self.prefs_path)
 
@@ -219,6 +220,11 @@ class FuturaLogger:
         line = f"=== {msg} ==="
         self._logger.info(line)
         self._emit(line, "info")
+
+    def flush(self):
+        """Força a escrita de todos os logs para o disco."""
+        for handler in self._logger.handlers:
+            handler.flush()
 
     # ── Leitura ──
 

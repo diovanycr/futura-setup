@@ -15,6 +15,8 @@ _INSTSVC_CANDIDATOS  = ["instsvc.exe"]
 _SERVIDOR_SUBDIRS    = ["", "bin"]
 
 def encontrar_exe(versao: str, nomes: list[str]) -> str | None:
+    if versao not in FB_CONFIGS:
+        return None
     fb_dir = FB_CONFIGS[versao]["dir"]
     for subdir in _SERVIDOR_SUBDIRS:
         base = os.path.join(fb_dir, subdir) if subdir else fb_dir

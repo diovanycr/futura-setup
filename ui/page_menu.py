@@ -3,10 +3,11 @@
 # =============================================================================
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QFrame
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QFrame,
+    QGraphicsDropShadowEffect
 )
-from PyQt6.QtCore import pyqtSignal, Qt
-from PyQt6.QtGui import QFont
+from PyQt6.QtCore import pyqtSignal, Qt, QPropertyAnimation, QEasingCurve, pyqtProperty
+from PyQt6.QtGui import QFont, QColor
 
 from ui.widgets import PageTitle, spacer
 from ui.theme import COLORS, FONT_SANS
@@ -24,8 +25,19 @@ class ActionCard(QWidget):
         super().__init__(parent)
         self._accent = accent
         self._state  = "normal"
+        self._glow   = 0
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setMinimumHeight(88)
+
+        self._anim = QPropertyAnimation(self, b"glow")
+        self._anim.setDuration(300)
+        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        self._shadow = QGraphicsDropShadowEffect(self)
+        self._shadow.setBlurRadius(0)
+        self._shadow.setOffset(0, 0)
+        self._shadow.setColor(QColor(accent))
+        self.setGraphicsEffect(self._shadow)
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(16, 14, 16, 14)
@@ -51,15 +63,26 @@ class ActionCard(QWidget):
         self._upd()
         theme_manager.theme_changed.connect(self._upd)
 
+    @pyqtProperty(int)
+    def glow(self):
+        return self._glow
+
+    @glow.setter
+    def glow(self, val):
+        self._glow = val
+        self._shadow.setBlurRadius(val * 0.25) # 0 a 25px
+        self._upd()
+
     def _upd(self, _mode: str = ""):
+        # Mistura a cor de destaque com a opacidade do brilho
         if self._state == "hover":
-            bg     = COLORS["accent_dim"]
+            bg = COLORS["accent_dim"]
             border = self._accent
         elif self._state == "press":
-            bg     = COLORS["panel_press"]
+            bg = COLORS["panel_press"]
             border = self._accent
         else:
-            bg     = COLORS["surface"]
+            bg = COLORS["surface"]
             border = COLORS["border"]
 
         self.setStyleSheet(f"""
@@ -85,10 +108,16 @@ class ActionCard(QWidget):
 
     def enterEvent(self, e):
         self._state = "hover"
+        self._anim.stop()
+        self._anim.setEndValue(100)
+        self._anim.start()
         self._upd()
 
     def leaveEvent(self, e):
         self._state = "normal"
+        self._anim.stop()
+        self._anim.setEndValue(0)
+        self._anim.start()
         self._upd()
 
     def mousePressEvent(self, e):

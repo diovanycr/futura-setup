@@ -19,6 +19,7 @@
 #   - _make_primary_btn / _make_secondary_btn: helpers com estilo aplicado diretamente
 # =============================================================================
 
+import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QStackedWidget, QScrollArea, QGridLayout, QPushButton
@@ -92,6 +93,61 @@ class ToggleSwitch(QWidget):
         p.drawRoundedRect(0, 4, 44, 16, 8, 8)
         p.setBrush(QBrush(QColor("#ffffff")))
         p.drawEllipse(self.__thumb_x, 2, 20, 20)
+        p.end()
+
+
+# ── RADAR WIDGET ──────────────────────────────────────────────────────────────
+
+class RadarWidget(QWidget):
+    """
+    Efeito de ondas expansivas (radar) para feedback de escaneamento.
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(120, 120)
+        self._rings = [0.0, 0.33, 0.66]
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+        self._active = False
+
+    def _tick(self):
+        for i in range(len(self._rings)):
+            self._rings[i] += 0.015
+            if self._rings[i] > 1.0:
+                self._rings[i] = 0.0
+        self.update()
+
+    def start(self):
+        self._active = True
+        self._timer.start(30)
+
+    def stop(self):
+        self._active = False
+        self._timer.stop()
+        self.update()
+
+    def paintEvent(self, e):
+        if not self._active:
+            return
+            
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        center = self.rect().center()
+        color = QColor(COLORS["accent"])
+        
+        for r in self._rings:
+            size = r * 110
+            alpha = int((1.0 - r) * 150)
+            if alpha < 0: alpha = 0
+            
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(color.red(), color.green(), color.blue(), alpha))
+            p.drawEllipse(center, size/2, size/2)
+        
+        # Core fixo
+        p.setBrush(color)
+        p.drawEllipse(center, 8, 8)
         p.end()
 
 
@@ -370,7 +426,7 @@ class PageScan(QWidget):
         status_lay.setContentsMargins(24, 20, 24, 20)
         status_lay.setSpacing(8)
 
-        self._spinner = LoadingSpinner(size=44)
+        self._radar = RadarWidget()
 
         self._status_lbl = QLabel("ESCANEANDO REDE...")
         self._status_lbl.setFont(QFont(FONT_SANS, 13, QFont.Weight.Bold))
@@ -382,7 +438,7 @@ class PageScan(QWidget):
         self._status_sub.setStyleSheet(f"color: {COLORS['text_dim']}; background: transparent; border: none;")
         self._status_sub.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
-        status_lay.addWidget(self._spinner, 0, Qt.AlignmentFlag.AlignHCenter)
+        status_lay.addWidget(self._radar, 0, Qt.AlignmentFlag.AlignHCenter)
         status_lay.addWidget(self._status_lbl)
         status_lay.addWidget(self._status_sub)
 
@@ -437,7 +493,7 @@ class PageScan(QWidget):
         if self._worker and self._worker.isRunning():
             self._worker.stop()
             self._worker.wait(2000)
-        self._spinner.stop()
+        self._radar.stop()
         self._build_hist_section()
         self._stack.setCurrentIndex(0)
 
@@ -452,7 +508,7 @@ class PageScan(QWidget):
         self._status_lbl.setText("ESCANEANDO REDE...")
         self._status_sub.setText(f"Método: {metodo.nome}")
         self._stack.setCurrentIndex(1)
-        self._spinner.start()
+        self._radar.start()
 
         self._worker = ScanWorker(metodo=metodo.key)
         self._worker.log_line.connect(self._scan_console.append_line)
@@ -463,11 +519,11 @@ class PageScan(QWidget):
     def _stop_scan(self):
         if self._worker:
             self._worker.stop()
-        self._spinner.stop()
+        self._radar.stop()
         self._stack.setCurrentIndex(0)
 
     def _on_scan_finished(self, servidores: list):
-        self._spinner.stop()
+        self._radar.stop()
         self._servidores = servidores
         if not servidores:
             self._status_lbl.setText("NENHUM SERVIDOR ENCONTRADO")
