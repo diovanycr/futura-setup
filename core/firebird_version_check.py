@@ -210,15 +210,10 @@ import sys, json, os
 dll  = sys.argv[1]
 path = sys.argv[2]
 user = sys.argv[3]
-pwd  = sys.argv[4]
+pwd_list = sys.argv[4].split('|')
 
 dll_dir = os.path.dirname(os.path.abspath(dll))
-
-# PATH: permite que o Windows encontre ib_util.dll, icudt67.dll, etc.
 os.environ['PATH'] = dll_dir + os.pathsep + os.environ.get('PATH', '')
-
-# FIREBIRD: indica ao fbclient.dll onde esta a pasta plugins (engine13.dll)
-# Isso e obrigatorio para o modo embedded funcionar sem servidor instalado.
 os.environ['FIREBIRD'] = dll_dir
 os.environ.setdefault('FIREBIRD_TMP', os.environ.get('TEMP', 'C:\\Temp'))
 
@@ -233,29 +228,38 @@ except Exception as e:
     print(json.dumps({'ok': False, 'error': f'load_api: {e}'}))
     sys.exit(0)
 
-# Tenta embedded primeiro (sem servidor), depois localhost (com servidor)
-last = ''
+# Erro detalhado por tentativa
+err_log = []
 for host in ['', 'localhost']:
-    try:
-        con = fdb.connect(host=host, database=path, user=user, password=pwd)
-        cur = con.cursor()
-        cur.execute('SELECT BUILD_BD, BUILD_EXE, VERSAO, CI FROM PARAMETROS')
-        row = cur.fetchone()
-        con.close()
-        if row:
-            print(json.dumps({
-                'ok': True,
-                'build_bd':  int(row[0]) if row[0] is not None else 0,
-                'build_exe': int(row[1]) if row[1] is not None else 0,
-                'versao':    str(row[2] or '').strip(),
-                'ci':        str(row[3] or '').strip(),
-            }))
-            sys.exit(0)
-        last = 'PARAMETROS vazia'
-    except Exception as e:
-        last = str(e)
+    labels = "Local (Embedded)" if not host else "Rede (Localhost)"
+    for pwd in pwd_list:
+        try:
+            con = fdb.connect(host=host, database=path, user=user, password=pwd)
+            cur = con.cursor()
+            cur.execute('SELECT BUILD_BD, BUILD_EXE, VERSAO, CI FROM PARAMETROS')
+            row = cur.fetchone()
+            con.close()
+            if row:
+                print(json.dumps({
+                    'ok': True,
+                    'build_bd':  int(row[0]) if row[0] is not None else 0,
+                    'build_exe': int(row[1]) if row[1] is not None else 0,
+                    'versao':    str(row[2] or '').strip(),
+                    'ci':        str(row[3] or '').strip(),
+                    'pwd_ok':    pwd,
+                    'host':      host
+                }))
+                sys.exit(0)
+            err_log.append(f"{labels} ({pwd}): PARAMETROS vazia")
+        except Exception as e:
+            msg = str(e).replace('\n', ' ').strip()
+            # Limpa mensagens de erro repetitivas
+            if "335544472" in msg: msg = "Senha invalida"
+            elif "335544721" in msg: msg = "Servidor nao rodando (localhost)"
+            err_log.append(f"{labels} ({pwd}): {msg}")
 
-print(json.dumps({'ok': False, 'error': last}))
+# Se chegou aqui, nada funcionou. Retorna a lista de erros.
+print(json.dumps({'ok': False, 'error': ' | '.join(err_log[:3])}))
 """
 
 
@@ -271,14 +275,15 @@ def _consultar_via_subprocess(
 
     python_exe = _sys.executable
 
-    # Em apps empacotados (PyInstaller) sys.executable e o .exe, nao o Python.
-    # Nesse caso voltamos ao metodo inprocess.
     if getattr(_sys, "frozen", False):
-        return None, "__frozen__"   # sinal para usar fallback inline
+        return None, "__frozen__"
+
+    # Testa ambas as senhas (sbofutura e masterkey como fallback)
+    pws = f"{password}|masterkey"
 
     try:
         proc = subprocess.run(
-            [python_exe, "-c", _SUBPROCESS_SCRIPT, dll, path, user, password],
+            [python_exe, "-c", _SUBPROCESS_SCRIPT, dll, path, user, pws],
             capture_output=True,
             text=True,
             timeout=20,
@@ -312,6 +317,25 @@ def _consultar_via_subprocess(
         return None, str(e)
 
 
+def _ler_ultimas_linhas_log(fb_dir: str, n_linhas: int = 15) -> str:
+    """Le as ultimas linhas do firebird.log na pasta informada para diagnostico de erro."""
+    log_path = os.path.join(fb_dir, "firebird.log")
+    if not os.path.isfile(log_path):
+        return ""
+    try:
+        with open(log_path, "rb") as f:
+            # Pula para o final e le os ultimos bytes
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            # Le ate 10KB do final
+            f.seek(max(0, size - 10240), os.SEEK_SET)
+            data = f.read().decode(errors="ignore")
+            linhas = [l.strip() for l in data.splitlines() if l.strip()]
+            return "\n".join(linhas[-n_linhas:])
+    except Exception:
+        return ""
+
+
 def _conectar_fdb_inline(dll: str, path: str, user: str, password: str):
     """Fallback inline (app empacotado): tenta conectar no processo atual."""
     import fdb  # type: ignore
@@ -341,14 +365,25 @@ def _conectar_fdb_inline(dll: str, path: str, user: str, password: str):
         except Exception as e:
             if "already loaded" not in str(e).lower():
                 raise
+
+        # Fallback inline tambem tenta masterkey se o primeiro falhar
+        pws = [password, "masterkey"]
+        ultimo_erro = None
+
         for host in ["", "localhost"]:
-            try:
-                return fdb.connect(
-                    host=host, database=path, user=user, password=password
-                )
-            except Exception:
-                pass
-        raise RuntimeError("Nao foi possivel conectar (embedded nem localhost)")
+            for pwd in pws:
+                try:
+                    return fdb.connect(
+                        host=host, database=path, user=user, password=pwd
+                    )
+                except Exception as e:
+                    ultimo_erro = e
+                    # Se for erro de autenticacao, continua tentando as proximas senhas
+                    if "335544472" in str(e):
+                        continue
+                    # Outros erros (lock, network, etc) para a execucao
+                    break
+        raise ultimo_erro
     finally:
         os.environ["PATH"] = old_path
         if old_fb:
@@ -364,131 +399,64 @@ def _conectar_fdb_inline(dll: str, path: str, user: str, password: str):
 
 def _consultar_parametros(
     path: str, user: str, password: str, ods_major: int = 0
-) -> tuple[dict | None, str]:
+) -> tuple[dict | None, str, str | None]:
     """
     Consulta BUILD_BD, BUILD_EXE, VERSAO e CI da tabela PARAMETROS.
-
-    Estrategia:
-      1. Para cada DLL candidata, executa a consulta em subprocess isolado
-         (contorna a limitacao do fdb: uma DLL por processo Python).
-      2. Se a DLL e compativel com o ODS e a conexao falha por outro motivo,
-         exibe o erro real (servidor parado, credenciais, etc.).
-      3. So exibe 'nenhuma DLL suporta' quando o unico erro e ODS -820.
+    Retorna (dados, erro_msg, dll_usada).
     """
     try:
         import fdb  # type: ignore  # noqa: F401
     except ImportError:
-        return None, "Modulo 'fdb' nao instalado. Execute: pip install fdb"
+        return None, "Modulo 'fdb' nao instalado. Execute: pip install fdb", None
 
-    # DLL principal (mais compativel com o ODS do banco)
-    dll_principal, _ = _encontrar_fbclient_dll(ods_major)
-    if not dll_principal:
-        return None, (
-            "fbclient.dll nao encontrada. "
-            "Instale o Firebird ou copie fbclient.dll para C:\\FuturaFirebird\\FB\\"
-        )
-
-    # Lista completa de DLLs para tentar (principal primeiro)
+    # Lista completa de DLLs para tentar (local primeiro por seguranca)
     todas_dlls_ordenadas = (
         _FB_DLL_CANDIDATOS["fb4"] +
         _FB_DLL_CANDIDATOS["fb3"] +
-        _FB_DLL_CANDIDATOS["fb2"] +
-        _FB_DLL_CANDIDATOS["fallback"]
+        _FB_DLL_CANDIDATOS.get("fb2", []) +
+        _FB_DLL_CANDIDATOS.get("fallback", [])
     )
-    vistas: set[str] = set()
-    dlls_para_tentar: list[str] = []
-    for dll in [dll_principal] + todas_dlls_ordenadas:
-        if dll not in vistas and _dll_existe(dll):
-            vistas.add(dll)
-            dlls_para_tentar.append(dll)
 
-    erros_ods_ok: list[str]           = []   # DLL versao-compativel, conexao falhou
-    erros_ods_incompativel: list[str] = []   # DLL versao-errada, deu -820 (esperado)
-    erros_outros: list[str]           = []   # Outros
-    usar_fallback_inline              = False
+    ultima_msg = "Nenhuma DLL suporta este banco ou caminho invalido."
 
-    for dll in dlls_para_tentar:
-        dll_ods       = _ods_da_dll(dll)
-        dll_compativel = (dll_ods == 0) or (dll_ods >= ods_major)
-        dir_dll       = os.path.basename(os.path.dirname(dll))
+    ultima_msg = "Nenhuma DLL suporta este banco ou caminho invalido."
 
-        # --- Tenta via subprocess (processo Python limpo, sem "DLL already loaded") ---
-        dados, erro = _consultar_via_subprocess(dll, path, user, password)
+    for dll in todas_dlls_ordenadas:
+        if not os.path.isfile(dll):
+            continue
 
-        if erro == "__frozen__":
-            # App empacotado — usa fallback inline para este e todos os demais
-            usar_fallback_inline = True
+        data, err = _consultar_via_subprocess(dll, path, user, password)
 
-        if usar_fallback_inline:
-            # Fallback: conexao no processo atual (limitado a primeira DLL carregada)
+        # Se o subprocess sinalizou que nao pode rodar (frozen), tenta inline
+        if err == "__frozen__":
             try:
                 con = _conectar_fdb_inline(dll, path, user, password)
                 cur = con.cursor()
                 cur.execute("SELECT BUILD_BD, BUILD_EXE, VERSAO, CI FROM PARAMETROS")
                 row = cur.fetchone()
                 con.close()
-                if not row:
-                    return None, "Tabela PARAMETROS vazia."
-                return {
-                    "build_bd":  int(row[0]) if row[0] is not None else 0,
-                    "build_exe": int(row[1]) if row[1] is not None else 0,
-                    "versao":    str(row[2]).strip() if row[2] is not None else "",
-                    "ci":        str(row[3]).strip() if row[3] is not None else "",
-                }, ""
+                if row:
+                    return {
+                        "build_bd":  int(row[0]) if row[0] is not None else 0,
+                        "build_exe": int(row[1]) if row[1] is not None else 0,
+                        "versao":    str(row[2] or "").strip(),
+                        "ci":        str(row[3] or "").strip(),
+                    }, "", dll
             except Exception as e:
-                msg = str(e)
-                if "-820" in msg or "unsupported on-disk structure" in msg.lower():
-                    erros_ods_incompativel.append(f"{dir_dll}: ODS incompativel")
-                elif dll_compativel:
-                    erros_ods_ok.append(f"{dir_dll}: {msg}")
-                else:
-                    erros_outros.append(f"{dir_dll}: {msg}")
+                err = str(e)
+
+        if data:
+            return data, "", dll
+
+        # Se for erro de ODS incompativel (-820), continua tentando outras versoes
+        if "-820" in err or "unsupported on-disk structure" in err.lower():
             continue
 
-        # subprocess retornou dados validos
-        if dados is not None:
-            return dados, ""
+        # Se for outro erro real (credenciais, lock, etc), para e exibe
+        ultima_msg = err
+        break
 
-        # Classifica o erro retornado pelo subprocess
-        if "-820" in erro or "unsupported on-disk structure" in erro.lower():
-            erros_ods_incompativel.append(f"{dir_dll}: ODS incompativel")
-        elif dll_compativel:
-            erros_ods_ok.append(f"{dir_dll}: {erro}")
-        else:
-            erros_outros.append(f"{dir_dll}: {erro}")
-
-    # -------------------------------------------------------------------------
-    # Nenhuma DLL conectou — monta mensagem util
-    # -------------------------------------------------------------------------
-    versao_banco = _ODS_MINOR_MAP.get(
-        (ods_major, 0), _ODS_MAP.get(ods_major, f"ODS {ods_major}")
-    )
-
-    if erros_ods_ok:
-        # A DLL certa esta instalada, mas a conexao falhou por outro motivo
-        return None, (
-            f"fbclient.dll do {versao_banco} encontrada, mas a conexao falhou.\n"
-            f"Erro: {erros_ods_ok[0]}\n"
-            f"Verifique se o servico Firebird esta ativo e se as credenciais estao corretas."
-        )
-
-    if erros_ods_incompativel and not erros_ods_ok:
-        dlls_dir = [
-            os.path.dirname(d) for d in dlls_para_tentar
-            if "system32" not in d.lower() and "syswow64" not in d.lower()
-        ]
-        msg_dlls = f"DLLs encontradas: {', '.join(dlls_dir)}" if dlls_dir else "Nenhuma instalacao compativel encontrada."
-        return None, (
-            f"Banco criado com {versao_banco} (ODS {ods_major}), "
-            f"mas nenhuma fbclient.dll instalada suporta essa versao.\n"
-            f"{msg_dlls}\n"
-            f"Instale o Firebird {versao_banco} em C:\\FuturaFirebird\\FB{ods_major - 9}\\ "
-            f"ou em C:\\Program Files\\Firebird\\Firebird_{ods_major - 9}_0\\"
-        )
-
-    todos = erros_ods_ok + erros_ods_incompativel + erros_outros
-    return None, todos[-1] if todos else "Erro desconhecido ao conectar."
-
+    return None, ultima_msg, None
 
 
 # =============================================================================
@@ -496,6 +464,11 @@ def _consultar_parametros(
 # =============================================================================
 
 def _encontrar_fb_dir() -> str | None:
+    import os
+    import winreg
+    import subprocess
+    import re
+
     def _tem_gfix(pasta: str) -> bool:
         return os.path.isfile(os.path.join(pasta, "gfix.exe"))
 
@@ -536,6 +509,10 @@ def _encontrar_fb_dir() -> str | None:
 
 
 def _versao_instalada() -> str:
+    import os
+    import subprocess
+    import re
+
     fb_dir = _encontrar_fb_dir()
     if not fb_dir:
         return "Nao encontrado"
@@ -574,11 +551,7 @@ def _versao_instalada() -> str:
     return f"Instalado em: {fb_dir}"
 
 
-# =============================================================================
-# Validação real via gfix
-# =============================================================================
-
-def _validar_com_gfix(path: str, user: str, password: str) -> dict:
+def _validar_com_gfix(path: str, user: str, password: str, gfix_bin_sugerido: str = "gfix") -> dict:
     resultado = {
         "executado":   False,
         "ok":          False,
@@ -588,15 +561,32 @@ def _validar_com_gfix(path: str, user: str, password: str) -> dict:
         "msg":         "",
     }
 
-    fb_dir = _encontrar_fb_dir()
-    if not fb_dir:
-        resultado["msg"] = "Firebird nao encontrado na maquina. Instale o Firebird para validar."
-        return resultado
+    gfix = gfix_bin_sugerido
+    
+    # Se o gfix sugerido nao existe e nao e o comando global, tenta achar algum gfix portable
+    if gfix != "gfix" and not os.path.isfile(gfix):
+        gfix = "gfix"
 
-    gfix = os.path.join(fb_dir, "gfix.exe")
-    if not os.path.isfile(gfix):
-        resultado["msg"] = f"gfix.exe nao encontrado em: {fb_dir}"
-        return resultado
+    # Se ainda nao temos um caminho completo, tenta descobrir o do sistema
+    if not os.path.isabs(gfix):
+        fb_dir = _encontrar_fb_dir()
+        if fb_dir:
+            temp_gfix = os.path.join(fb_dir, "gfix.exe")
+            if os.path.isfile(temp_gfix):
+                gfix = temp_gfix
+
+    # Se for "gfix" puro, precisamos garantir que o subprocess nao de WinError 2
+    # se o gfix nao estiver no PATH.
+    try:
+        # Testa se 'gfix -?' funciona
+        subprocess.run([gfix, "-?"], capture_output=True, timeout=2)
+    except (FileNotFoundError, Exception):
+        if not os.path.isabs(gfix):
+            resultado["msg"] = (
+                "Utilitario gfix nao encontrado. "
+                "Instale o Firebird ou verifique a pasta bin/firebird/."
+            )
+            return resultado
 
     try:
         proc = subprocess.run(
@@ -736,9 +726,21 @@ def verificar_versao_fdb(
         result["erro"] = "Nenhum arquivo informado."
         return result
 
+    # 1. Verifica se caminhos de rede (UNC) estao sendo usados no modo embutido
+    if path.startswith(r"\\"):
+        result["erro"] = (
+            "Caminhos de rede (\\\\Servidor\\...) nao sao suportados pelo modo embedded.\n"
+            "Solucao: Mapeie a pasta como uma unidade de disco (ex: Z:) ou instale o Firebird Server."
+        )
+        return result
+
     if not os.path.isfile(path):
         result["erro"] = f"Arquivo nao encontrado: {path}"
         return result
+
+    # 2. Verifica se o arquivo eh somente leitura
+    if not os.access(path, os.W_OK):
+        result["header_avisos"] = ["Aviso: O arquivo esta marcado como SOMENTE LEITURA no Windows."]
 
     ext = os.path.splitext(path)[1].lower()
     if ext not in (".fdb", ".gdb", ".db"):
@@ -777,18 +779,58 @@ def verificar_versao_fdb(
         )
         versao_instalada = _versao_instalada()
         header           = _verificar_header(path, page_size)
-        gfix             = _validar_com_gfix(path, user, password) if rodar_gfix else {
+
+        # 3. Tenta ler parametros com diagnostico de erro aprimorado
+        # Agora retorna tambem qual DLL (engine) funcionou
+        params_data, params_erro, dll_usada = _consultar_parametros(path, user, password, ods_major)
+
+        # 4. Se houver erro de conexao, tenta ler o log do Firebird local (a "caixa-preta")
+        log_diagnostico = ""
+        if params_erro and dll_usada:
+            fb_dir_portable = os.path.dirname(dll_usada)
+            log_diagnostico = _ler_ultimas_linhas_log(fb_dir_portable)
+
+        # Determina o gfix a ser usado (tenta o da mesma pasta da DLL usada)
+        gfix_bin = "gfix"
+        if dll_usada:
+            fb_dir_portable = os.path.dirname(dll_usada)
+            gfix_portable = os.path.join(fb_dir_portable, "gfix.exe")
+            if os.path.isfile(gfix_portable):
+                gfix_bin = gfix_portable
+
+        # Tratamento especial para erros de Lock/Uso
+        if "335544344" in params_erro or "file in use" in params_erro.lower() or "sharing violation" in params_erro.lower():
+            params_erro = (
+                "O banco de dados esta BLOQUEADO por outro programa ou pelo Futura Server.\n"
+                "Feche os demais programas que usam o banco para conseguir identificar a versao."
+            )
+
+        # 5. Dicas de Otimizacao e Performance (Consultoria)
+        dicas_performance = []
+        if page_size < 16384:
+            dicas_performance.append(
+                f"Dica Performance: O 'Page Size' atual ({page_size}) e considerado pequeno para FB3/FB4. "
+                "Recomendamos fazer um Backup/Restore para 16384 (16k) para melhorar a velocidade."
+            )
+        
+        # Dialeto 1 e considerado legado/obsoleto em relacao ao Dialeto 3
+        # Mas para verificar o dialeto precisariamos do header completo ou conexao.
+        # Por enquanto ficaremos no Page Size que ja temos.
+
+        gfix = _validar_com_gfix(path, user, password, gfix_bin) if rodar_gfix else {
             "executado": False, "ok": False,
             "erros": [], "avisos": [], "saida_bruta": "", "msg": "",
         }
-
-        params_data, params_erro = _consultar_parametros(path, user, password, ods_major)
 
         build_bd           = 0
         build_exe          = 0
         ci_raw             = ""
         versao_futura      = ""
         versao_futura_erro = params_erro
+
+        # Se houver erros no log, anexa a mensagem de erro da versao
+        if log_diagnostico:
+            versao_futura_erro += f"\n\n--- Detalhes do Log (firebird.log) ---\n{log_diagnostico}"
 
         if params_data:
             build_bd  = params_data["build_bd"]
@@ -809,17 +851,23 @@ def verificar_versao_fdb(
 
         id_cliente      = ci_para_id_cliente(ci_raw) if ci_raw else ""
         id_cliente_erro = "" if ci_raw else (params_erro or "CI nao disponivel.")
+        
+        if log_diagnostico and not ci_raw:
+             id_cliente_erro += f"\n\n--- Log de Erro ---\n{log_diagnostico}"
 
         result.update({
             "ok":                True,
+            "engine_usada":      dll_usada or "Sistema (fbclient.dll)",
             "ods_major":         ods_major,
             "ods_minor":         ods_minor,
             "versao_arquivo":    versao_arquivo,
             "versao_instalada":  versao_instalada,
             "page_size":         page_size,
+            "dicas_performance": dicas_performance,
             "header_ok":         header["ok"],
             "header_erros":      header["erros"],
             "header_detalhes":   header["detalhes"],
+            "log_erros":         log_diagnostico,
             "gfix_executado":    gfix["executado"],
             "gfix_ok":           gfix["ok"],
             "gfix_erros":        gfix["erros"],
