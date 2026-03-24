@@ -97,9 +97,16 @@ def ci_para_id_cliente(ci: str | int) -> str:
 # Localizar fbclient.dll por ODS — tenta a DLL compatível primeiro
 # =============================================================================
 
+# --- Localiza diretório do projeto para busca de DLLs embutidas ---
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_LOCAL_FB4 = os.path.join(_BASE_DIR, "bin", "firebird", "FB4")
+_LOCAL_FB3 = os.path.join(_BASE_DIR, "bin", "firebird", "FB3")
+
 # Caminhos candidatos por versão do Firebird
+# Prioridade: 1. Pasta Local (bin/) -> 2. Pasta Portable (C:\FuturaFirebird) -> 3. Instalação Padrão
 _FB_DLL_CANDIDATOS: dict[str, list[str]] = {
     "fb4": [
+        os.path.join(_LOCAL_FB4, "fbclient.dll"),
         r"C:\FuturaFirebird\FB\fbclient.dll",
         r"C:\FuturaFirebird\FB4\fbclient.dll",
         r"C:\FuturaFirebird\Firebird\fbclient.dll",
@@ -108,6 +115,7 @@ _FB_DLL_CANDIDATOS: dict[str, list[str]] = {
         r"C:\Program Files (x86)\Firebird\Firebird_4_0\fbclient.dll",
     ],
     "fb3": [
+        os.path.join(_LOCAL_FB3, "fbclient.dll"),
         r"C:\FuturaFirebird\FB3\fbclient.dll",
         r"C:\Program Files\Firebird\Firebird_3_0\fbclient.dll",
         r"C:\Program Files (x86)\Firebird\Firebird_3_0\fbclient.dll",
@@ -191,27 +199,167 @@ def _ods_da_dll(dll_path: str) -> int:
 
 
 # =============================================================================
-# Consulta à tabela PARAMETROS — tenta DLL compatível e faz fallback
+# Consulta via subprocess — isola o carregamento da DLL em processo limpo
 # =============================================================================
 
-def _conectar_fdb(dll: str, path: str, user: str, password: str):
-    """Tenta conectar usando fdb com a DLL informada. Retorna conexão ou lança exceção."""
-    import fdb  # type: ignore
+# Script Python embutido executado em subprocesso para cada DLL candidata.
+# Recebe argumentos: dll_path db_path user password
+_SUBPROCESS_SCRIPT = r"""
+import sys, json, os
+
+dll  = sys.argv[1]
+path = sys.argv[2]
+user = sys.argv[3]
+pwd  = sys.argv[4]
+
+dll_dir = os.path.dirname(os.path.abspath(dll))
+
+# PATH: permite que o Windows encontre ib_util.dll, icudt67.dll, etc.
+os.environ['PATH'] = dll_dir + os.pathsep + os.environ.get('PATH', '')
+
+# FIREBIRD: indica ao fbclient.dll onde esta a pasta plugins (engine13.dll)
+# Isso e obrigatorio para o modo embedded funcionar sem servidor instalado.
+os.environ['FIREBIRD'] = dll_dir
+os.environ.setdefault('FIREBIRD_TMP', os.environ.get('TEMP', 'C:\\Temp'))
+
+if hasattr(os, 'add_dll_directory'):
+    try: os.add_dll_directory(dll_dir)
+    except: pass
+
+try:
+    import fdb
     fdb.load_api(dll)
-    tentativas = [
-        {"host": "",          "database": path},
-        {"host": "localhost", "database": path},
-    ]
-    ultimo_erro = None
-    for params in tentativas:
+except Exception as e:
+    print(json.dumps({'ok': False, 'error': f'load_api: {e}'}))
+    sys.exit(0)
+
+# Tenta embedded primeiro (sem servidor), depois localhost (com servidor)
+last = ''
+for host in ['', 'localhost']:
+    try:
+        con = fdb.connect(host=host, database=path, user=user, password=pwd)
+        cur = con.cursor()
+        cur.execute('SELECT BUILD_BD, BUILD_EXE, VERSAO, CI FROM PARAMETROS')
+        row = cur.fetchone()
+        con.close()
+        if row:
+            print(json.dumps({
+                'ok': True,
+                'build_bd':  int(row[0]) if row[0] is not None else 0,
+                'build_exe': int(row[1]) if row[1] is not None else 0,
+                'versao':    str(row[2] or '').strip(),
+                'ci':        str(row[3] or '').strip(),
+            }))
+            sys.exit(0)
+        last = 'PARAMETROS vazia'
+    except Exception as e:
+        last = str(e)
+
+print(json.dumps({'ok': False, 'error': last}))
+"""
+
+
+def _consultar_via_subprocess(
+    dll: str, path: str, user: str, password: str
+) -> tuple[dict | None, str]:
+    """
+    Executa a consulta PARAMETROS em subprocess isolado.
+    Contorna a limitao do fdb (uma DLL por processo Python).
+    """
+    import json
+    import sys as _sys
+
+    python_exe = _sys.executable
+
+    # Em apps empacotados (PyInstaller) sys.executable e o .exe, nao o Python.
+    # Nesse caso voltamos ao metodo inprocess.
+    if getattr(_sys, "frozen", False):
+        return None, "__frozen__"   # sinal para usar fallback inline
+
+    try:
+        proc = subprocess.run(
+            [python_exe, "-c", _SUBPROCESS_SCRIPT, dll, path, user, password],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            encoding="utf-8",
+            errors="ignore",
+        )
+        raw = (proc.stdout or "").strip()
+        if not raw:
+            stderr = (proc.stderr or "").strip()
+            return None, stderr or "Sem resposta do subprocess"
+
         try:
-            return fdb.connect(
-                host=params["host"], database=params["database"],
-                user=user, password=password,
-            )
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return None, f"Resposta invalida: {raw[:200]}"
+
+        if data.get("ok"):
+            return {
+                "build_bd":  data.get("build_bd",  0),
+                "build_exe": data.get("build_exe", 0),
+                "versao":    data.get("versao",    ""),
+                "ci":        data.get("ci",        ""),
+            }, ""
+        return None, data.get("error", "Erro desconhecido no subprocess")
+
+    except subprocess.TimeoutExpired:
+        return None, "Timeout (20s) ao conectar. Banco muito grande ou servidor bloqueado."
+    except FileNotFoundError:
+        return None, "__frozen__"   # python_exe nao encontrado, usa fallback
+    except Exception as e:
+        return None, str(e)
+
+
+def _conectar_fdb_inline(dll: str, path: str, user: str, password: str):
+    """Fallback inline (app empacotado): tenta conectar no processo atual."""
+    import fdb  # type: ignore
+
+    dll_dir = os.path.dirname(os.path.abspath(dll))
+
+    # PATH: DLLs dependentes (ib_util.dll, ICU, etc.)
+    old_path = os.environ.get("PATH", "")
+    if dll_dir.lower() not in old_path.lower():
+        os.environ["PATH"] = dll_dir + os.pathsep + old_path
+
+    # FIREBIRD: diz ao fbclient.dll onde esta a pasta plugins\
+    old_fb   = os.environ.get("FIREBIRD", "")
+    os.environ["FIREBIRD"] = dll_dir
+    os.environ.setdefault("FIREBIRD_TMP", os.environ.get("TEMP", "C:\\Temp"))
+
+    _ctx = None
+    if hasattr(os, "add_dll_directory"):
+        try:
+            _ctx = os.add_dll_directory(dll_dir)
+        except Exception:
+            pass
+
+    try:
+        try:
+            fdb.load_api(dll)
         except Exception as e:
-            ultimo_erro = e
-    raise ultimo_erro
+            if "already loaded" not in str(e).lower():
+                raise
+        for host in ["", "localhost"]:
+            try:
+                return fdb.connect(
+                    host=host, database=path, user=user, password=password
+                )
+            except Exception:
+                pass
+        raise RuntimeError("Nao foi possivel conectar (embedded nem localhost)")
+    finally:
+        os.environ["PATH"] = old_path
+        if old_fb:
+            os.environ["FIREBIRD"] = old_fb
+        else:
+            os.environ.pop("FIREBIRD", None)
+        if _ctx is not None:
+            try:
+                _ctx.close()
+            except Exception:
+                pass
 
 
 def _consultar_parametros(
@@ -220,18 +368,19 @@ def _consultar_parametros(
     """
     Consulta BUILD_BD, BUILD_EXE, VERSAO e CI da tabela PARAMETROS.
 
-    Estratégia:
-      1. Tenta a DLL mais compatível com o ODS do banco.
-      2. Se falhar com SQLCODE -820 (ODS incompatível), tenta as outras DLLs
-         disponíveis na máquina em ordem decrescente de versão.
-      3. Retorna erro claro se nenhuma DLL conseguir conectar.
+    Estrategia:
+      1. Para cada DLL candidata, executa a consulta em subprocess isolado
+         (contorna a limitacao do fdb: uma DLL por processo Python).
+      2. Se a DLL e compativel com o ODS e a conexao falha por outro motivo,
+         exibe o erro real (servidor parado, credenciais, etc.).
+      3. So exibe 'nenhuma DLL suporta' quando o unico erro e ODS -820.
     """
     try:
-        import fdb  # type: ignore
+        import fdb  # type: ignore  # noqa: F401
     except ImportError:
         return None, "Modulo 'fdb' nao instalado. Execute: pip install fdb"
 
-    # Monta lista de todas as DLLs disponíveis na máquina, sem repetir
+    # DLL principal (mais compativel com o ODS do banco)
     dll_principal, _ = _encontrar_fbclient_dll(ods_major)
     if not dll_principal:
         return None, (
@@ -239,67 +388,96 @@ def _consultar_parametros(
             "Instale o Firebird ou copie fbclient.dll para C:\\FuturaFirebird\\FB\\"
         )
 
-    # Lista completa de DLLs para tentar (principal primeiro, depois as demais)
+    # Lista completa de DLLs para tentar (principal primeiro)
     todas_dlls_ordenadas = (
         _FB_DLL_CANDIDATOS["fb4"] +
         _FB_DLL_CANDIDATOS["fb3"] +
         _FB_DLL_CANDIDATOS["fb2"] +
         _FB_DLL_CANDIDATOS["fallback"]
     )
-    # Remove duplicatas mantendo ordem, coloca a principal na frente
-    vistas = set()
+    vistas: set[str] = set()
     dlls_para_tentar: list[str] = []
     for dll in [dll_principal] + todas_dlls_ordenadas:
         if dll not in vistas and _dll_existe(dll):
             vistas.add(dll)
             dlls_para_tentar.append(dll)
 
-    erros_por_dll: list[str] = []
-    erro_ods_incompativel = False
+    erros_ods_ok: list[str]           = []   # DLL versao-compativel, conexao falhou
+    erros_ods_incompativel: list[str] = []   # DLL versao-errada, deu -820 (esperado)
+    erros_outros: list[str]           = []   # Outros
+    usar_fallback_inline              = False
 
     for dll in dlls_para_tentar:
-        try:
-            con = _conectar_fdb(dll, path, user, password)
-            cur = con.cursor()
-            cur.execute("SELECT BUILD_BD, BUILD_EXE, VERSAO, CI FROM PARAMETROS")
-            row = cur.fetchone()
-            con.close()
-            if not row:
-                return None, "Tabela PARAMETROS vazia."
-            return {
-                "build_bd":  int(row[0]) if row[0] is not None else 0,
-                "build_exe": int(row[1]) if row[1] is not None else 0,
-                "versao":    str(row[2]).strip() if row[2] is not None else "",
-                "ci":        str(row[3]).strip() if row[3] is not None else "",
-            }, ""
+        dll_ods       = _ods_da_dll(dll)
+        dll_compativel = (dll_ods == 0) or (dll_ods >= ods_major)
+        dir_dll       = os.path.basename(os.path.dirname(dll))
 
-        except Exception as e:
-            msg = str(e)
-            erros_por_dll.append(f"{os.path.basename(os.path.dirname(dll))}: {msg}")
+        # --- Tenta via subprocess (processo Python limpo, sem "DLL already loaded") ---
+        dados, erro = _consultar_via_subprocess(dll, path, user, password)
 
-            # Detecta SQLCODE -820: DLL não suporta o ODS do banco
-            if "-820" in msg or "unsupported on-disk structure" in msg.lower():
-                erro_ods_incompativel = True
-                continue  # Tenta próxima DLL
-            else:
-                # Erro de outro tipo (autenticação, arquivo em uso, etc.)
-                # Continua tentando mas registra
-                continue
+        if erro == "__frozen__":
+            # App empacotado — usa fallback inline para este e todos os demais
+            usar_fallback_inline = True
 
-    # Nenhuma DLL funcionou — monta mensagem clara
-    if erro_ods_incompativel:
-        versao_banco = _ODS_MINOR_MAP.get(
-            (ods_major, 0),
-            _ODS_MAP.get(ods_major, f"ODS {ods_major}")
+        if usar_fallback_inline:
+            # Fallback: conexao no processo atual (limitado a primeira DLL carregada)
+            try:
+                con = _conectar_fdb_inline(dll, path, user, password)
+                cur = con.cursor()
+                cur.execute("SELECT BUILD_BD, BUILD_EXE, VERSAO, CI FROM PARAMETROS")
+                row = cur.fetchone()
+                con.close()
+                if not row:
+                    return None, "Tabela PARAMETROS vazia."
+                return {
+                    "build_bd":  int(row[0]) if row[0] is not None else 0,
+                    "build_exe": int(row[1]) if row[1] is not None else 0,
+                    "versao":    str(row[2]).strip() if row[2] is not None else "",
+                    "ci":        str(row[3]).strip() if row[3] is not None else "",
+                }, ""
+            except Exception as e:
+                msg = str(e)
+                if "-820" in msg or "unsupported on-disk structure" in msg.lower():
+                    erros_ods_incompativel.append(f"{dir_dll}: ODS incompativel")
+                elif dll_compativel:
+                    erros_ods_ok.append(f"{dir_dll}: {msg}")
+                else:
+                    erros_outros.append(f"{dir_dll}: {msg}")
+            continue
+
+        # subprocess retornou dados validos
+        if dados is not None:
+            return dados, ""
+
+        # Classifica o erro retornado pelo subprocess
+        if "-820" in erro or "unsupported on-disk structure" in erro.lower():
+            erros_ods_incompativel.append(f"{dir_dll}: ODS incompativel")
+        elif dll_compativel:
+            erros_ods_ok.append(f"{dir_dll}: {erro}")
+        else:
+            erros_outros.append(f"{dir_dll}: {erro}")
+
+    # -------------------------------------------------------------------------
+    # Nenhuma DLL conectou — monta mensagem util
+    # -------------------------------------------------------------------------
+    versao_banco = _ODS_MINOR_MAP.get(
+        (ods_major, 0), _ODS_MAP.get(ods_major, f"ODS {ods_major}")
+    )
+
+    if erros_ods_ok:
+        # A DLL certa esta instalada, mas a conexao falhou por outro motivo
+        return None, (
+            f"fbclient.dll do {versao_banco} encontrada, mas a conexao falhou.\n"
+            f"Erro: {erros_ods_ok[0]}\n"
+            f"Verifique se o servico Firebird esta ativo e se as credenciais estao corretas."
         )
-        dlls_disponiveis = [
+
+    if erros_ods_incompativel and not erros_ods_ok:
+        dlls_dir = [
             os.path.dirname(d) for d in dlls_para_tentar
             if "system32" not in d.lower() and "syswow64" not in d.lower()
         ]
-        if dlls_disponiveis:
-            msg_dlls = f"DLLs encontradas: {', '.join(dlls_disponiveis)}"
-        else:
-            msg_dlls = "Nenhuma instalacao do Firebird compativel encontrada."
+        msg_dlls = f"DLLs encontradas: {', '.join(dlls_dir)}" if dlls_dir else "Nenhuma instalacao compativel encontrada."
         return None, (
             f"Banco criado com {versao_banco} (ODS {ods_major}), "
             f"mas nenhuma fbclient.dll instalada suporta essa versao.\n"
@@ -308,8 +486,9 @@ def _consultar_parametros(
             f"ou em C:\\Program Files\\Firebird\\Firebird_{ods_major - 9}_0\\"
         )
 
-    # Erro genérico — retorna o último erro
-    return None, erros_por_dll[-1] if erros_por_dll else "Erro desconhecido ao conectar."
+    todos = erros_ods_ok + erros_ods_incompativel + erros_outros
+    return None, todos[-1] if todos else "Erro desconhecido ao conectar."
+
 
 
 # =============================================================================

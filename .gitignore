@@ -1,4 +1,4 @@
-# Python
+# --- Python ---
 __pycache__/
 *.py[cod]
 *$py.class
@@ -20,33 +20,19 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-
-# PyInstaller
-#  Workaround for https://github.com/pyinstaller/pyinstaller/issues/1931
-*.manifest
-#  These are usually kept but can be generated
-# *.spec
-
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
-
-# Unit test / coverage reports
-.pytest_cache/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-
-# Environments
-.env
 .venv
 venv/
 ENV/
 
-# IDEs
+# --- Firebird Binaries (Portable) ---
+# Ignorando para manter o repositorio Git leve (cerca de 40MB+)
+# Quem baixar o projeto precisara copiar as DLLs manualmente para local_setup/bin/
+bin/firebird/
+
+# --- Diagnostico ---
+testar_embedded.py
+
+# --- IDEs ---
 .vscode/
 .idea/
 *.swp
