@@ -67,6 +67,7 @@ class _VerificarWorker(QThread):
 
 
 class _VarreduraWorker(QThread):
+    """Varre o site e retorna versão mais recente + sistemas/arquivos disponíveis."""
     concluido = pyqtSignal(dict)
     erro      = pyqtSignal(str)
 
@@ -122,7 +123,6 @@ class _VarreduraWorker(QThread):
                         and not a.get_text(strip=True).startswith("?")
                         and "/" not in a.get_text(strip=True).strip("/")
                         and not a.get_text(strip=True).endswith(".zip")
-                        and a.get_text(strip=True).strip("/").upper() != "GENERICO"
                     ]
                     resultado["sistemas"][sistema] = {}
                     for sub in subpastas:
@@ -151,6 +151,7 @@ class _VarreduraWorker(QThread):
 
 
 class _DownloadWorker(QThread):
+    """Baixa os arquivos selecionados + DLLs e extrai tudo."""
     progresso  = pyqtSignal(str, int)
     concluido  = pyqtSignal(str)
     erro       = pyqtSignal(str)
@@ -165,18 +166,26 @@ class _DownloadWorker(QThread):
     def run(self):
         try:
             if os.path.isdir(self._pasta):
-                conteudo = [f for f in os.listdir(self._pasta) if not f.startswith("_backup_")]
+                conteudo = [
+                    f for f in os.listdir(self._pasta)
+                    if not f.startswith("_backup_")
+                ]
                 if conteudo:
-                    data_str  = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    pasta_bkp = os.path.join(self._pasta, f"_backup_{data_str}")
+                    data_str   = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    pasta_bkp  = os.path.join(self._pasta, f"_backup_{data_str}")
                     self.progresso.emit("Criando backup da pasta existente...", 0)
                     try:
                         os.makedirs(pasta_bkp, exist_ok=True)
                         for nome in conteudo:
                             origem  = os.path.join(self._pasta, nome)
                             destino = os.path.join(pasta_bkp, nome)
-                            shutil.move(origem, destino)
-                        self.progresso.emit(f"Arquivos movidos para: _backup_{data_str}", 2)
+                            if os.path.isdir(origem):
+                                shutil.copytree(origem, destino)
+                            else:
+                                shutil.copy2(origem, destino)
+                        self.progresso.emit(
+                            f"Backup criado em: _backup_{data_str}", 2
+                        )
                     except Exception as e_bkp:
                         self.erro.emit(
                             f"Falha ao criar backup — download cancelado.\n"
@@ -236,7 +245,8 @@ class _DownloadWorker(QThread):
             "CEP_PATH=CEP\n"
             f"BACKUP_PATH={backup_path}\n"
         )
-        with open(os.path.join(pasta, "Futura.ini"), "w", encoding="utf-8") as f:
+        ini_path = os.path.join(pasta, "Futura.ini")
+        with open(ini_path, "w", encoding="utf-8") as f:
             f.write(conteudo)
 
     def _baixar(self, url: str, dest: str):
@@ -253,7 +263,7 @@ class _DownloadWorker(QThread):
 
 
 # =============================================================================
-# Widgets auxiliares
+# Widgets auxiliares compartilhados
 # =============================================================================
 
 def _divider() -> QFrame:
@@ -270,16 +280,19 @@ class _PathFieldDB(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(4)
+
         self._lbl  = QLabel("Caminho do arquivo de banco de dados (.fdb)")
         self._edit = QLineEdit()
         self._edit.setPlaceholderText(r"Ex: C:\FuturaDados\GOURMET.fdb")
         self._btn  = make_folder_btn(self)
         self._btn.setToolTip("Selecionar arquivo .fdb")
         self._btn.clicked.connect(self._browse)
+
         row = QHBoxLayout()
         row.setSpacing(4)
         row.addWidget(self._edit, 1)
         row.addWidget(self._btn)
+
         lay.addWidget(self._lbl)
         lay.addLayout(row)
         theme_manager.theme_changed.connect(self._upd)
@@ -370,35 +383,82 @@ class _ResultCard(QFrame):
         lay.setContentsMargins(20, 16, 20, 16)
         lay.setSpacing(6)
 
-        # ── Versão Futura + ID do Cliente (duas colunas) ───────────────────
-        row_top = QHBoxLayout()
-        row_top.setSpacing(24)
-
-        col_versao = QVBoxLayout()
-        col_versao.setSpacing(4)
-        col_versao.addWidget(self._sec("Versao do Sistema Futura"))
+        # ── Versão Futura ────────────────────────────────────────────────────
+        lay.addWidget(self._sec("Versao do Sistema Futura"))
         self._lbl_versao_futura = QLabel("")
         self._lbl_versao_futura.setFont(QFont(FONT_SANS, 18, QFont.Weight.Bold))
-        col_versao.addWidget(self._lbl_versao_futura)
+        lay.addWidget(self._lbl_versao_futura)
+
+        # Row com BUILD_BD, BUILD_EXE e VERSAO (descriptografado) lado a lado
+        row_builds = QHBoxLayout()
+        row_builds.setSpacing(16)
+
+        # BUILD_BD
+        row_builds.addWidget(self._mid("BUILD_BD:"))
+        self._edit_build_bd = QLineEdit("")
+        self._edit_build_bd.setReadOnly(True)
+        self._edit_build_bd.setFixedHeight(28)
+        self._edit_build_bd.setFixedWidth(100)
+        self._edit_build_bd.setFont(QFont(FONT_MONO, 11, QFont.Weight.Bold))
+        row_builds.addWidget(self._edit_build_bd)
+
+        # BUILD_EXE
+        row_builds.addWidget(self._mid("BUILD_EXE:"))
+        self._edit_build_exe = QLineEdit("")
+        self._edit_build_exe.setReadOnly(True)
+        self._edit_build_exe.setFixedHeight(28)
+        self._edit_build_exe.setFixedWidth(100)
+        self._edit_build_exe.setFont(QFont(FONT_MONO, 11, QFont.Weight.Bold))
+        row_builds.addWidget(self._edit_build_exe)
+
+        # VERSAO (descriptografado)
+        row_builds.addWidget(self._mid("VERSAO:"))
+        self._edit_versao_campo = QLineEdit("")
+        self._edit_versao_campo.setReadOnly(True)
+        self._edit_versao_campo.setFixedHeight(28)
+        self._edit_versao_campo.setFixedWidth(130)
+        self._edit_versao_campo.setFont(QFont(FONT_MONO, 11, QFont.Weight.Bold))
+        row_builds.addWidget(self._edit_versao_campo)
+
+        row_builds.addStretch()
+        lay.addLayout(row_builds)
+
+        self._lbl_futura_status = QLabel("")
+        self._lbl_futura_status.setFont(QFont(FONT_SANS, 9))
+        lay.addWidget(self._lbl_futura_status)
+
         self._lbl_futura_erro = QLabel("")
         self._lbl_futura_erro.setFont(QFont(FONT_MONO, 9))
         self._lbl_futura_erro.setWordWrap(True)
-        col_versao.addWidget(self._lbl_futura_erro)
+        lay.addWidget(self._lbl_futura_erro)
 
-        col_id = QVBoxLayout()
-        col_id.setSpacing(4)
-        col_id.addWidget(self._sec("ID do Cliente"))
+        lay.addSpacing(6)
+        lay.addWidget(_divider())
+        lay.addSpacing(2)
+
+        # ── ID do Cliente ────────────────────────────────────────────────────
+        lay.addWidget(self._sec("ID do Cliente"))
+
         self._lbl_id_cliente = QLabel("")
         self._lbl_id_cliente.setFont(QFont(FONT_SANS, 18, QFont.Weight.Bold))
-        col_id.addWidget(self._lbl_id_cliente)
+        lay.addWidget(self._lbl_id_cliente)
+
+        row_ci = QHBoxLayout()
+        row_ci.setSpacing(8)
+        row_ci.addWidget(self._mid("CI:"))
+        self._edit_ci = QLineEdit("")
+        self._edit_ci.setReadOnly(True)
+        self._edit_ci.setFixedHeight(28)
+        self._edit_ci.setMinimumWidth(200)
+        self._edit_ci.setFont(QFont(FONT_MONO, 9))
+        row_ci.addWidget(self._edit_ci)
+        row_ci.addStretch()
+        lay.addLayout(row_ci)
+
         self._lbl_id_cliente_erro = QLabel("")
         self._lbl_id_cliente_erro.setFont(QFont(FONT_MONO, 9))
         self._lbl_id_cliente_erro.setWordWrap(True)
-        col_id.addWidget(self._lbl_id_cliente_erro)
-
-        row_top.addLayout(col_versao, 1)
-        row_top.addLayout(col_id, 1)
-        lay.addLayout(row_top)
+        lay.addWidget(self._lbl_id_cliente_erro)
 
         lay.addSpacing(6)
         lay.addWidget(_divider())
@@ -465,18 +525,27 @@ class _ResultCard(QFrame):
         lay.addSpacing(2)
 
         # ── Botões copiar ─────────────────────────────────────────────────────
-        self._btn_copiar_versao = self._make_copy_btn("Copiar Versao")
-        self._btn_copiar_id     = self._make_copy_btn("Copiar ID")
-        self._btn_copiar_tudo   = self._make_copy_btn("Copiar Tudo")
-        for btn in (self._btn_copiar_versao, self._btn_copiar_id, self._btn_copiar_tudo):
+        self._btn_copiar_build    = self._make_copy_btn("Copiar BUILD_BD")
+        self._btn_copiar_build_exe = self._make_copy_btn("Copiar BUILD_EXE")
+        self._btn_copiar_versao   = self._make_copy_btn("Copiar VERSAO")
+        self._btn_copiar_id       = self._make_copy_btn("Copiar ID")
+        self._btn_copiar_tudo     = self._make_copy_btn("Copiar Tudo")
+        for btn in (
+            self._btn_copiar_build, self._btn_copiar_build_exe,
+            self._btn_copiar_versao, self._btn_copiar_id, self._btn_copiar_tudo
+        ):
             btn.setFixedWidth(130)
 
+        self._btn_copiar_build.clicked.connect(self._copiar_build)
+        self._btn_copiar_build_exe.clicked.connect(self._copiar_build_exe)
         self._btn_copiar_versao.clicked.connect(self._copiar_versao)
         self._btn_copiar_id.clicked.connect(self._copiar_id)
         self._btn_copiar_tudo.clicked.connect(self._copiar_tudo)
 
         row_copy = QHBoxLayout()
         row_copy.setSpacing(8)
+        row_copy.addWidget(self._btn_copiar_build)
+        row_copy.addWidget(self._btn_copiar_build_exe)
         row_copy.addWidget(self._btn_copiar_versao)
         row_copy.addWidget(self._btn_copiar_id)
         row_copy.addWidget(self._btn_copiar_tudo)
@@ -492,7 +561,7 @@ class _ResultCard(QFrame):
         self._result_cache: dict = {}
         self._atualizar_estilo()
 
-    # ── helpers ──────────────────────────────────────────────────────────────
+    # ── helpers de estilo ────────────────────────────────────────────────────
 
     def _sec(self, txt):
         lbl = QLabel(txt)
@@ -530,39 +599,66 @@ class _ResultCard(QFrame):
         btn.setText("OK!")
         QTimer.singleShot(1500, lambda: btn.setText(original))
 
-    # ── copiar ───────────────────────────────────────────────────────────────
+    # ── ações copiar ─────────────────────────────────────────────────────────
+
+    def _copiar_build(self):
+        build = self._edit_build_bd.text().strip()
+        if build:
+            QApplication.clipboard().setText(build)
+            self._feedback_btn(self._btn_copiar_build, "Copiar BUILD_BD")
+
+    def _copiar_build_exe(self):
+        build = self._edit_build_exe.text().strip()
+        if build:
+            QApplication.clipboard().setText(build)
+            self._feedback_btn(self._btn_copiar_build_exe, "Copiar BUILD_EXE")
 
     def _copiar_versao(self):
-        v = self._lbl_versao_futura.text().strip()
-        if v and v != "Nao identificado":
-            QApplication.clipboard().setText(v)
-            self._feedback_btn(self._btn_copiar_versao, "Copiar Versao")
+        versao = self._edit_versao_campo.text().strip()
+        if versao and versao != "Nao disponivel":
+            QApplication.clipboard().setText(versao)
+            self._feedback_btn(self._btn_copiar_versao, "Copiar VERSAO")
 
     def _copiar_id(self):
-        v = self._lbl_id_cliente.text().strip()
-        if v and v != "Nao identificado":
-            QApplication.clipboard().setText(v)
+        id_cli = self._lbl_id_cliente.text().strip()
+        if id_cli and id_cli != "Nao identificado":
+            QApplication.clipboard().setText(id_cli)
             self._feedback_btn(self._btn_copiar_id, "Copiar ID")
 
     def _copiar_tudo(self):
         r = self._result_cache
         if not r:
             return
-        versao_campo  = r.get("versao_futura", "N/A") or "N/A"
+        build_bd      = r.get("build_bd", 0)
+        build_exe     = r.get("build_exe", 0)
+        versao_campo  = r.get("versao_campo", "N/A") or "N/A"
+        versao_futura = r.get("versao_futura", "N/A")
+        est           = "estimado" if r.get("versao_futura_est") else "confirmado"
+        id_cliente    = r.get("id_cliente", "N/A")
+        ci_raw        = r.get("ci", "N/A")
+        versao_arq    = r.get("versao_arquivo", "N/A")
+        ods           = f"{r.get('ods_major',0)}.{r.get('ods_minor',0)}"
+        pg            = r.get("page_size", 0)
+        versao_inst   = r.get("versao_instalada", "N/A")
         header_ok     = "OK" if r.get("header_ok") else "COM PROBLEMAS"
         gfix_ok       = "OK" if r.get("gfix_ok") else "COM ERROS" if r.get("gfix_executado") else "NAO EXECUTADO"
+        arquivo       = self._lbl_arquivo.text()
         linhas = [
             "=== FUTURA SETUP — Verificacao de Versao ===",
-            f"Arquivo        : {self._lbl_arquivo.text()}", "",
+            f"Arquivo        : {arquivo}", "",
             "[Sistema Futura]",
-            f"VERSAO         : {versao_campo}", "",
+            f"BUILD_BD       : {build_bd}",
+            f"BUILD_EXE      : {build_exe}",
+            f"VERSAO (campo) : {versao_campo}",
+            f"Versao Futura  : {versao_futura} ({est})", "",
             "[Cliente]",
-            f"ID do Cliente  : {r.get('id_cliente', 'N/A')}", "",
+            f"CI             : {ci_raw}",
+            f"ID do Cliente  : {id_cliente}", "",
             "[Firebird]",
-            f"Versao arquivo : {r.get('versao_arquivo', 'N/A')}",
-            f"ODS            : {r.get('ods_major',0)}.{r.get('ods_minor',0)}",
-            f"Page size      : {r.get('page_size', 0)} bytes",
-            f"Instalado      : {r.get('versao_instalada', 'N/A')}", "",
+            f"Versao arquivo : {versao_arq}",
+            f"ODS            : {ods}",
+            f"Page size      : {pg} bytes",
+            f"Instalado      : {versao_inst}", "",
             "[Integridade]",
             f"Cabecalho      : {header_ok}",
             f"gfix validate  : {gfix_ok}",
@@ -576,29 +672,60 @@ class _ResultCard(QFrame):
         QApplication.clipboard().setText("\n".join(linhas))
         self._feedback_btn(self._btn_copiar_tudo, "Copiar Tudo")
 
-    # ── atualizar card ───────────────────────────────────────────────────────
+    # ── atualizar card com resultado ─────────────────────────────────────────
 
     def atualizar(self, result: dict, path: str):
         self._result_cache = result
 
-        versao_futura      = result.get("versao_futura", "")
-        versao_futura_erro = result.get("versao_futura_erro", "")
+        # Versão Futura
+        build_bd      = result.get("build_bd", 0)
+        build_exe     = result.get("build_exe", 0)
+        versao_campo  = result.get("versao_campo", "")
+        versao_futura = result.get("versao_futura", "")
+        est           = result.get("versao_futura_est", False)
+        futura_erro   = result.get("versao_futura_erro", "")
 
-        # Título principal — VERSAO descriptografado
         if versao_futura:
             self._lbl_versao_futura.setText(versao_futura)
             self._lbl_versao_futura.setStyleSheet(
-                f"color: {COLORS.get('accent2','#2ecc71')}; background: transparent; border: none;"
+                f"color: {COLORS.get('accent','#00c2ff')}; background: transparent; border: none;"
+            )
+            if est:
+                status_txt = "* Versao estimada por BUILD_BD (VERSAO nao disponivel)"
+                status_cor = COLORS.get("warn", "#f39c12")
+            else:
+                status_txt = "v Versao confirmada pelo campo VERSAO (descriptografado)"
+                status_cor = COLORS.get("accent2", "#2ecc71")
+            self._lbl_futura_status.setText(status_txt)
+            self._lbl_futura_status.setStyleSheet(
+                f"color: {status_cor}; background: transparent; border: none;"
             )
         else:
             self._lbl_versao_futura.setText("Nao identificado")
             self._lbl_versao_futura.setStyleSheet(
                 f"color: {COLORS.get('text_dim','#888')}; background: transparent; border: none;"
             )
+            self._lbl_futura_status.setText("")
 
-        # Erro de descriptografia
-        if versao_futura_erro:
-            self._lbl_futura_erro.setText(f"! {versao_futura_erro}")
+        # BUILD_BD
+        self._edit_build_bd.setText(str(build_bd) if build_bd else "Nao disponivel")
+
+        # BUILD_EXE
+        self._edit_build_exe.setText(str(build_exe) if build_exe else "Nao disponivel")
+
+        # VERSAO descriptografado
+        if versao_campo:
+            self._edit_versao_campo.setText(versao_campo)
+            self._edit_versao_campo.setStyleSheet(
+                self._edit_versao_campo.styleSheet().replace(
+                    COLORS.get("text_mid", "#aaa"), COLORS.get("accent2", "#2ecc71")
+                )
+            )
+        else:
+            self._edit_versao_campo.setText("Nao disponivel")
+
+        if futura_erro:
+            self._lbl_futura_erro.setText(f"! {futura_erro}")
             self._lbl_futura_erro.setStyleSheet(
                 f"color: {COLORS.get('warn','#f39c12')}; background: transparent; border: none;"
             )
@@ -607,6 +734,7 @@ class _ResultCard(QFrame):
 
         # ID do Cliente
         id_cliente      = result.get("id_cliente", "")
+        ci_raw          = result.get("ci", "")
         id_cliente_erro = result.get("id_cliente_erro", "")
 
         if id_cliente:
@@ -619,6 +747,8 @@ class _ResultCard(QFrame):
             self._lbl_id_cliente.setStyleSheet(
                 f"color: {COLORS.get('text_dim','#888')}; background: transparent; border: none;"
             )
+
+        self._edit_ci.setText(ci_raw if ci_raw else "Nao disponivel")
 
         if id_cliente_erro:
             self._lbl_id_cliente_erro.setText(f"! {id_cliente_erro}")
@@ -701,6 +831,27 @@ class _ResultCard(QFrame):
         bg      = COLORS.get("bg",      "#0a0e1a")
         border  = COLORS.get("border",  "#1e2d45")
 
+        _field_style = f"""
+            QLineEdit {{
+                background: {bg}; color: {accent};
+                border: 1px solid {border}; border-radius: 4px; padding: 0 8px;
+                selection-background-color: {accent}; selection-color: #000;
+            }}
+        """
+        self._edit_build_bd.setStyleSheet(_field_style)
+        self._edit_build_exe.setStyleSheet(_field_style)
+        self._edit_versao_campo.setStyleSheet(f"""
+            QLineEdit {{
+                background: {bg}; color: {accent2};
+                border: 1px solid {border}; border-radius: 4px; padding: 0 8px;
+            }}
+        """)
+        self._edit_ci.setStyleSheet(f"""
+            QLineEdit {{
+                background: {bg}; color: {mid};
+                border: 1px solid {border}; border-radius: 4px; padding: 0 8px;
+            }}
+        """)
         self._lbl_versao_arquivo.setStyleSheet(f"color: {accent}; background: transparent; border: none;")
         self._lbl_versao_instalada.setStyleSheet(f"color: {accent2}; background: transparent; border: none;")
         self._lbl_ods.setStyleSheet(f"color: {mid}; background: transparent; border: none;")
@@ -768,6 +919,7 @@ class _AbaVerificar(QWidget):
         self._btn_ir_download.clicked.connect(self._on_ir_download)
 
         lay.addWidget(btn_row(self._btn_verificar, self._btn_ir_download))
+
         lay.addWidget(spacer(h=6))
 
         self._alert = AlertBox("", "info")
@@ -779,6 +931,7 @@ class _AbaVerificar(QWidget):
         lay.addWidget(self._card_result)
 
         lay.addStretch()
+
         scroll.setWidget(inner)
         root.addWidget(scroll)
 
@@ -875,10 +1028,10 @@ class _CheckItem(QWidget):
         self._chk = QCheckBox()
         self._chk.setChecked(True)
 
-        lbl_sistema = QLabel(subpasta)
-        lbl_sistema.setFont(QFont(FONT_MONO, 9, QFont.Weight.Bold))
-        lbl_sistema.setStyleSheet(f"color: {COLORS.get('accent','#00c2ff')}; background: transparent;")
-        lbl_sistema.setFixedWidth(220)
+        lbl_sis = QLabel(f"[{subpasta}]")
+        lbl_sis.setFont(QFont(FONT_MONO, 9))
+        lbl_sis.setStyleSheet(f"color: {COLORS.get('text_mid','#aaa')}; background: transparent;")
+        lbl_sis.setFixedWidth(220)
 
         lbl_arq = QLabel(arquivo)
         lbl_arq.setFont(QFont(FONT_MONO, 9))
@@ -886,7 +1039,7 @@ class _CheckItem(QWidget):
         lbl_arq.setMinimumWidth(200)
 
         lay.addWidget(self._chk)
-        lay.addWidget(lbl_sistema)
+        lay.addWidget(lbl_sis)
         lay.addWidget(lbl_arq, 1)
 
     @property
@@ -928,7 +1081,8 @@ class _AbaDownload(QWidget):
                     background: {COLORS.get('bg','#0a0e1a')};
                     color: {COLORS.get('accent','#0078d4')};
                     border: 1.5px solid {COLORS.get('accent','#0078d4')};
-                    border-radius: 5px; padding: 0 10px; font-weight: 600;
+                    border-radius: 5px; padding: 0 10px;
+                    font-weight: 600;
                 }}
             """)
         else:
@@ -960,13 +1114,25 @@ class _AbaDownload(QWidget):
 
         self._lay.addWidget(SectionHeader("Pasta de destino"))
 
-        self._chk_pasta_padrao = QCheckBox(r"Usar pasta padrão:  C:\Futura_{ID do cliente}_{versão}")
+        self._chk_pasta_padrao = QCheckBox(
+            r"Usar pasta padrão:  C:\Futura_{ID do cliente}_{versão}"
+        )
         self._chk_pasta_padrao.setChecked(True)
         self._chk_pasta_padrao.setFont(QFont(FONT_SANS, 10))
         self._chk_pasta_padrao.setStyleSheet(f"""
-            QCheckBox {{ color: {COLORS.get('accent','#0078d4')}; background: transparent; spacing: 6px; font-weight: 600; }}
-            QCheckBox::indicator {{ width: 16px; height: 16px; border: 1.5px solid {COLORS.get('border','#444')}; border-radius: 3px; background: {COLORS.get('surface','#111')}; }}
-            QCheckBox::indicator:checked {{ background: {COLORS.get('accent','#0078d4')}; border-color: {COLORS.get('accent','#0078d4')}; }}
+            QCheckBox {{
+                color: {COLORS.get('accent','#0078d4')};
+                background: transparent; spacing: 6px; font-weight: 600;
+            }}
+            QCheckBox::indicator {{
+                width: 16px; height: 16px;
+                border: 1.5px solid {COLORS.get('border','#444')};
+                border-radius: 3px; background: {COLORS.get('surface','#111')};
+            }}
+            QCheckBox::indicator:checked {{
+                background: {COLORS.get('accent','#0078d4')};
+                border-color: {COLORS.get('accent','#0078d4')};
+            }}
         """)
         self._chk_pasta_padrao.stateChanged.connect(self._on_pasta_padrao_toggle)
         self._lay.addWidget(self._chk_pasta_padrao)
@@ -982,6 +1148,7 @@ class _AbaDownload(QWidget):
         row_pasta.addWidget(self._edit_pasta, 1)
         row_pasta.addWidget(self._btn_pasta)
         self._lay.addLayout(row_pasta)
+
         self._on_pasta_padrao_toggle(True)
 
         self._lay.addWidget(h_line())
@@ -1021,7 +1188,10 @@ class _AbaDownload(QWidget):
         self._progress.setValue(0)
         self._progress.setFont(QFont(FONT_SANS, 9, QFont.Weight.Bold))
         self._progress.setStyleSheet(f"""
-            QProgressBar {{ background: {COLORS.get('border','#333')}; border-radius: 5px; border: none; color: {COLORS.get('text','#eee')}; text-align: center; }}
+            QProgressBar {{
+                background: {COLORS.get('border','#333')}; border-radius: 5px;
+                border: none; color: {COLORS.get('text','#eee')}; text-align: center;
+            }}
             QProgressBar::chunk {{ background: {COLORS.get('accent','#0078d4')}; border-radius: 5px; }}
         """)
         self._progress.setVisible(False)
@@ -1035,6 +1205,7 @@ class _AbaDownload(QWidget):
 
         self._btn_varrer = make_primary_btn("VARRER SITE", 150)
         self._btn_varrer.clicked.connect(self._on_varrer)
+
         self._btn_baixar = make_primary_btn("BAIXAR SELECIONADOS", 180)
         self._btn_baixar.clicked.connect(self._on_baixar)
         self._btn_baixar.setVisible(False)
@@ -1063,8 +1234,15 @@ class _AbaDownload(QWidget):
         self._btn_toggle.setFont(QFont(FONT_SANS, 10))
         self._btn_toggle.setStyleSheet(f"""
             QCheckBox {{ color: {COLORS.get('text','#eee')}; background: transparent; spacing: 6px; }}
-            QCheckBox::indicator {{ width: 16px; height: 16px; border: 1.5px solid {COLORS.get('border','#444')}; border-radius: 3px; background: {COLORS.get('surface','#111')}; }}
-            QCheckBox::indicator:checked {{ background: {COLORS.get('accent','#0078d4')}; border-color: {COLORS.get('accent','#0078d4')}; }}
+            QCheckBox::indicator {{
+                width: 16px; height: 16px;
+                border: 1.5px solid {COLORS.get('border','#444')};
+                border-radius: 3px; background: {COLORS.get('surface','#111')};
+            }}
+            QCheckBox::indicator:checked {{
+                background: {COLORS.get('accent','#0078d4')};
+                border-color: {COLORS.get('accent','#0078d4')};
+            }}
         """)
         self._btn_toggle.setVisible(False)
         self._btn_toggle.stateChanged.connect(self._toggle_todos)
@@ -1092,6 +1270,7 @@ class _AbaDownload(QWidget):
         self._lay.addWidget(self._chk_ini)
 
         self._lay.addStretch()
+
         scroll.setWidget(inner)
         root.addWidget(scroll)
 
@@ -1112,7 +1291,8 @@ class _AbaDownload(QWidget):
         self._btn_baixar.setVisible(False)
         self._overlay.show_with("Varrendo site... aguarde.")
 
-        worker = _VarreduraWorker(self._edit_versao.text().strip())
+        versao_manual = self._edit_versao.text().strip()
+        worker = _VarreduraWorker(versao_manual)
         worker.concluido.connect(self._on_varredura_concluida)
         worker.erro.connect(self._on_varredura_erro)
         worker.finished.connect(lambda: setattr(self, "_worker", None))
@@ -1156,8 +1336,9 @@ class _AbaDownload(QWidget):
         self._btn_baixar.setVisible(True)
 
     def _toggle_todos(self, state: int):
+        marcado = bool(state)
         for it in self._itens_ui:
-            it._chk.setChecked(bool(state))
+            it._chk.setChecked(marcado)
 
     def _on_varredura_erro(self, msg):
         self._overlay.hide_spinner()
@@ -1169,7 +1350,11 @@ class _AbaDownload(QWidget):
         if not pasta:
             self._mostrar_alerta("Informe a pasta de destino.", "warn")
             return
-        selecionados = [{"nome": it.arquivo, "url": it.url} for it in self._itens_ui if it.selecionado]
+
+        selecionados = [
+            {"nome": it.arquivo, "url": it.url}
+            for it in self._itens_ui if it.selecionado
+        ]
         if not selecionados and not self._chk_dll.isChecked():
             self._mostrar_alerta("Selecione ao menos um arquivo.", "warn")
             return
@@ -1201,7 +1386,9 @@ class _AbaDownload(QWidget):
         self._progress.setValue(100)
         self._progress.setFormat("100%  —  Concluido!")
         self._lbl_resultado.setText(f"✔  Download concluido com sucesso!\n{pasta}")
-        self._lbl_resultado.setStyleSheet(f"color: {COLORS.get('accent2','#2ecc71')}; background: transparent;")
+        self._lbl_resultado.setStyleSheet(
+            f"color: {COLORS.get('accent2','#2ecc71')}; background: transparent;"
+        )
         self._lbl_resultado.setVisible(True)
 
     def _on_download_erro(self, msg):
@@ -1210,7 +1397,9 @@ class _AbaDownload(QWidget):
         self._btn_varrer.setEnabled(True)
         self._progress.setFormat("Erro!")
         self._lbl_resultado.setText(f"✖  {msg}")
-        self._lbl_resultado.setStyleSheet(f"color: {COLORS.get('danger','#e74c3c')}; background: transparent;")
+        self._lbl_resultado.setStyleSheet(
+            f"color: {COLORS.get('danger','#e74c3c')}; background: transparent;"
+        )
         self._lbl_resultado.setVisible(True)
 
     def _mostrar_alerta(self, txt, kind):
@@ -1293,10 +1482,11 @@ class PageVerificarVersaoFdb(QWidget):
         self._aba_verificar.ir_para_download.connect(self._ir_para_download)
 
         root.addWidget(self._tabs, 1)
+
         self._upd_style()
 
     def _ir_para_download(self, versao: str):
-        result     = self._aba_verificar._card_result._result_cache
+        result = self._aba_verificar._card_result._result_cache
         id_cliente = result.get("id_cliente", "")
         self._tabs.setCurrentIndex(1)
         self._aba_download.definir_contexto(id_cliente, versao)

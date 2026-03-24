@@ -10,6 +10,7 @@ import re
 import struct
 import subprocess
 import winreg
+from datetime import datetime, timedelta
 
 
 # =============================================================================
@@ -20,18 +21,36 @@ _AES_CHAVE = "H5m4454pFjh201dp54Ddd8gP5Hf6GVFd"
 
 
 def decrypt_aes(base64_texto: str, chave_str: str = _AES_CHAVE) -> str:
+    """
+    Descriptografa um valor AES-CBC/PKCS7 no formato usado pelo sistema Futura.
+
+    Formato do valor cifrado:
+        base64( base64(dados_cifrados) + "::" + iv_utf8 )
+
+    Args:
+        base64_texto: String base64 vinda do campo VERSAO (ou outro campo cifrado).
+        chave_str:    Chave AES de 32 bytes. Padrão: _AES_CHAVE.
+
+    Returns:
+        String descriptografada (ex: "2026.02.09") ou "" em caso de erro.
+
+    Raises:
+        ImportError: Se pycryptodome não estiver instalado.
+        Exception:   Outros erros de descriptografia.
+    """
     try:
-        from Crypto.Cipher import AES
-        from Crypto.Util.Padding import unpad
+        from Crypto.Cipher import AES          # type: ignore
+        from Crypto.Util.Padding import unpad  # type: ignore
     except ImportError as exc:
         raise ImportError(
             "Modulo 'pycryptodome' nao instalado. Execute: pip install pycryptodome"
         ) from exc
 
-    raw    = base64.b64decode(base64_texto)
-    texto  = raw.decode("utf-8")
-    partes = texto.split("::")
+    # Decodifica envelope externo → "base64(dados)::iv"
+    raw   = base64.b64decode(base64_texto)
+    texto = raw.decode("utf-8")
 
+    partes = texto.split("::")
     if len(partes) != 2:
         raise ValueError(f"Formato AES invalido — esperado 'dados::iv', obtido: {texto!r}")
 
@@ -82,10 +101,79 @@ _VALID_PAGE_SIZES = {1024, 2048, 4096, 8192, 16384, 32768}
 
 
 # =============================================================================
+# Versão do Sistema Futura — cálculo por BUILD_BD (fallback)
+# =============================================================================
+
+_FUTURA_ANCHOR_PREFIX = 73
+_FUTURA_ANCHOR_DATE   = datetime(2021, 4, 26)
+_FUTURA_ANCHOR_114    = datetime(2026, 2, 9)
+_FUTURA_AVG_INTERVAL  = (
+    (_FUTURA_ANCHOR_114 - _FUTURA_ANCHOR_DATE).days / (114 - _FUTURA_ANCHOR_PREFIX)
+)  # ~42.68 dias por release
+
+_FUTURA_HISTORICO: dict[int, str] = {
+    5:  "2015.12.02",  6:  "2016.03.14",  7:  "2016.04.11",
+    8:  "2016.05.09",  9:  "2016.06.06",  10: "2016.08.01",
+    11: "2016.08.29",  12: "2016.09.26",  13: "2016.10.24",
+    14: "2016.11.21",  15: "2017.01.16",  16: "2017.02.13",
+    17: "2017.03.13",  18: "2017.04.10",  19: "2017.05.08",
+    20: "2017.06.05",  21: "2017.07.03",  22: "2017.07.31",
+    23: "2017.08.28",  25: "2017.09.25",  26: "2017.10.23",
+    27: "2017.11.20",  28: "2018.01.29",  29: "2018.02.26",
+    31: "2018.03.26",  32: "2018.04.23",  33: "2018.05.21",
+    34: "2018.06.18",  35: "2018.07.16",  36: "2018.08.13",
+    37: "2018.09.10",  38: "2018.10.08",  39: "2018.11.05",
+    40: "2018.12.03",  41: "2019.01.28",  42: "2019.02.25",
+    43: "2019.03.25",  44: "2019.04.22",  45: "2019.05.20",
+    46: "2019.06.17",  47: "2019.07.15",  48: "2019.08.12",
+    49: "2019.09.09",  50: "2019.10.07",  51: "2019.11.04",
+    52: "2019.12.02",  53: "2020.01.27",  59: "2020.02.24",
+    61: "2020.04.20",  62: "2020.05.18",  63: "2020.06.15",
+    64: "2020.07.13",  65: "2020.08.01",  66: "2020.09.01",
+    67: "2020.10.01",  68: "2020.11.02",  69: "2020.11.30",
+    70: "2021.02.01",  71: "2021.03.01",  72: "2021.03.29",
+    73: "2021.04.26",  114: "2026.02.09",
+}
+
+
+def _build_para_versao_futura(build_bd: int) -> tuple[str, bool]:
+    """
+    Converte BUILD_BD em versão estimada do sistema Futura (usado como fallback
+    quando o campo VERSAO não está disponível ou não pôde ser descriptografado).
+
+    Retorna:
+        (versao_str, is_estimado)
+    """
+    s = str(abs(build_bd))
+    if len(s) >= 5:
+        prefix = int(s[:3])
+    elif len(s) >= 3:
+        prefix = int(s[:2])
+    else:
+        prefix = int(s[:1])
+
+    if prefix in _FUTURA_HISTORICO:
+        versao_completa = _FUTURA_HISTORICO[prefix]
+        versao_curta    = ".".join(versao_completa.split(".")[:2])
+        return versao_curta, False
+
+    days = (prefix - _FUTURA_ANCHOR_PREFIX) * _FUTURA_AVG_INTERVAL
+    dt   = _FUTURA_ANCHOR_DATE + timedelta(days=days)
+    return dt.strftime("%Y.%m"), True
+
+
+# =============================================================================
 # ID do Cliente — cálculo por CI
 # =============================================================================
 
 def ci_para_id_cliente(ci: str | int) -> str:
+    """
+    Calcula o ID do Cliente a partir do campo CI da tabela PARAMETROS.
+
+    Regras:
+        - Se CI terminar em "001" → ID = "1" + 4 primeiros dígitos do CI
+        - Caso contrário          → ID = 4 primeiros dígitos do CI
+    """
     ci_str = re.sub(r"\D", "", str(ci).strip())
     if len(ci_str) < 4:
         return ""
@@ -93,173 +181,123 @@ def ci_para_id_cliente(ci: str | int) -> str:
     return ("1" + primeiros) if ci_str.endswith("001") else primeiros
 
 
-# =============================================================================
-# Localizar fbclient.dll por ODS — tenta a DLL compatível primeiro
-# =============================================================================
+def _consultar_ci(
+    path: str, user: str, password: str, ods_major: int = 0
+) -> tuple[str | None, str]:
+    """Conecta no .fdb e retorna (CI, erro)."""
+    try:
+        import fdb  # type: ignore
+    except ImportError:
+        return None, "Modulo 'fdb' nao instalado. Execute: pip install fdb"
 
-# Caminhos candidatos por versão do Firebird
-_FB_DLL_CANDIDATOS: dict[str, list[str]] = {
-    "fb4": [
+    dll = _encontrar_fbclient_dll(ods_major)
+    if not dll:
+        return None, (
+            "fbclient.dll nao encontrada. "
+            "Instale o Firebird ou copie fbclient.dll para C:\\FuturaFirebird\\FB\\"
+        )
+
+    try:
+        fdb.load_api(dll)
+    except Exception as e:
+        return None, f"Erro ao carregar fbclient.dll ({dll}): {e}"
+
+    tentativas = [
+        {"host": "",          "database": path},
+        {"host": "localhost", "database": path},
+    ]
+    ultimo_erro = ""
+    for params in tentativas:
+        try:
+            con = fdb.connect(
+                host=params["host"], database=params["database"],
+                user=user, password=password,
+            )
+            cur = con.cursor()
+            cur.execute("SELECT CI FROM PARAMETROS")
+            row = cur.fetchone()
+            con.close()
+            if row and row[0] is not None:
+                return str(row[0]).strip(), ""
+            return None, "Campo CI vazio ou nulo em PARAMETROS."
+        except Exception as e:
+            ultimo_erro = str(e)
+            continue
+
+    return None, ultimo_erro
+
+
+def _encontrar_fbclient_dll(ods_major: int = 0) -> str | None:
+    """Localiza fbclient.dll compatível com a versão do banco."""
+    fb4_candidatos = [
         r"C:\FuturaFirebird\FB\fbclient.dll",
         r"C:\FuturaFirebird\FB4\fbclient.dll",
         r"C:\FuturaFirebird\Firebird\fbclient.dll",
         r"C:\Program Files\Firebird\Firebird_5_0\fbclient.dll",
         r"C:\Program Files\Firebird\Firebird_4_0\fbclient.dll",
         r"C:\Program Files (x86)\Firebird\Firebird_4_0\fbclient.dll",
-    ],
-    "fb3": [
+    ]
+    fb3_candidatos = [
         r"C:\FuturaFirebird\FB3\fbclient.dll",
         r"C:\Program Files\Firebird\Firebird_3_0\fbclient.dll",
         r"C:\Program Files (x86)\Firebird\Firebird_3_0\fbclient.dll",
-    ],
-    "fb2": [
-        r"C:\Program Files\Firebird\Firebird_2_5\fbclient.dll",
-        r"C:\Program Files (x86)\Firebird\Firebird_2_5\fbclient.dll",
-    ],
-    "fallback": [
+    ]
+    fallback = [
         r"C:\Windows\System32\fbclient.dll",
         r"C:\Windows\SysWOW64\fbclient.dll",
-    ],
-}
-
-
-def _dll_existe(path: str) -> bool:
-    return os.path.isfile(path)
-
-
-def _primeira_dll(lista: list[str]) -> str | None:
-    return next((p for p in lista if _dll_existe(p)), None)
-
-
-def _encontrar_fbclient_dll(ods_major: int = 0) -> tuple[str | None, str]:
-    """
-    Localiza a fbclient.dll mais compatível com o ODS do banco.
-
-    Retorna:
-        (caminho_dll, descricao_versao)  ou  (None, "")
-    """
-    if ods_major >= 13:
-        # Banco FB4/FB5 — tenta FB4 primeiro, depois FB3 como fallback
-        ordem = [
-            (_FB_DLL_CANDIDATOS["fb4"], "Firebird 4/5"),
-            (_FB_DLL_CANDIDATOS["fb3"], "Firebird 3"),
-            (_FB_DLL_CANDIDATOS["fallback"], "sistema"),
-        ]
-    elif ods_major == 12:
-        # Banco FB3 — tenta FB3 primeiro, depois FB4
-        ordem = [
-            (_FB_DLL_CANDIDATOS["fb3"], "Firebird 3"),
-            (_FB_DLL_CANDIDATOS["fb4"], "Firebird 4/5"),
-            (_FB_DLL_CANDIDATOS["fallback"], "sistema"),
-        ]
-    elif ods_major == 11:
-        ordem = [
-            (_FB_DLL_CANDIDATOS["fb2"], "Firebird 2.5"),
-            (_FB_DLL_CANDIDATOS["fb3"], "Firebird 3"),
-            (_FB_DLL_CANDIDATOS["fallback"], "sistema"),
-        ]
-    else:
-        ordem = [
-            (_FB_DLL_CANDIDATOS["fb4"], "Firebird 4/5"),
-            (_FB_DLL_CANDIDATOS["fb3"], "Firebird 3"),
-            (_FB_DLL_CANDIDATOS["fb2"], "Firebird 2.5"),
-            (_FB_DLL_CANDIDATOS["fallback"], "sistema"),
-        ]
-
-    for candidatos, descricao in ordem:
-        dll = _primeira_dll(candidatos)
-        if dll:
-            return dll, descricao
-    return None, ""
-
-
-def _ods_da_dll(dll_path: str) -> int:
-    """
-    Tenta inferir o ODS máximo suportado pela DLL a partir do caminho.
-    Retorna 0 se não identificado.
-    """
-    p = dll_path.lower()
-    if "firebird_5" in p or "fb5" in p:
-        return 13
-    if "firebird_4" in p or "fb4" in p or (r"futurafirebird\fb" in p and "fb3" not in p):
-        return 13
-    if "firebird_3" in p or "fb3" in p:
-        return 12
-    if "firebird_2" in p or "fb2" in p:
-        return 11
-    return 0
-
-
-# =============================================================================
-# Consulta à tabela PARAMETROS — tenta DLL compatível e faz fallback
-# =============================================================================
-
-def _conectar_fdb(dll: str, path: str, user: str, password: str):
-    """Tenta conectar usando fdb com a DLL informada. Retorna conexão ou lança exceção."""
-    import fdb  # type: ignore
-    fdb.load_api(dll)
-    tentativas = [
-        {"host": "",          "database": path},
-        {"host": "localhost", "database": path},
     ]
-    ultimo_erro = None
-    for params in tentativas:
-        try:
-            return fdb.connect(
-                host=params["host"], database=params["database"],
-                user=user, password=password,
-            )
-        except Exception as e:
-            ultimo_erro = e
-    raise ultimo_erro
+    if ods_major >= 13:
+        ordem = fb4_candidatos + fb3_candidatos + fallback
+    elif ods_major == 12:
+        ordem = fb3_candidatos + fb4_candidatos + fallback
+    else:
+        ordem = fb4_candidatos + fb3_candidatos + fallback
+
+    for c in ordem:
+        if os.path.isfile(c):
+            return c
+    return None
 
 
 def _consultar_parametros(
     path: str, user: str, password: str, ods_major: int = 0
 ) -> tuple[dict | None, str]:
     """
-    Consulta BUILD_BD, BUILD_EXE, VERSAO e CI da tabela PARAMETROS.
+    Consulta BUILD_BD, BUILD_EXE, VERSAO e CI da tabela PARAMETROS em uma
+    única conexão, reduzindo overhead de I/O.
 
-    Estratégia:
-      1. Tenta a DLL mais compatível com o ODS do banco.
-      2. Se falhar com SQLCODE -820 (ODS incompatível), tenta as outras DLLs
-         disponíveis na máquina em ordem decrescente de versão.
-      3. Retorna erro claro se nenhuma DLL conseguir conectar.
+    Retorna:
+        ({"build_bd": int, "build_exe": int, "versao": str, "ci": str}, erro)
+        ou (None, mensagem_de_erro)
     """
     try:
         import fdb  # type: ignore
     except ImportError:
         return None, "Modulo 'fdb' nao instalado. Execute: pip install fdb"
 
-    # Monta lista de todas as DLLs disponíveis na máquina, sem repetir
-    dll_principal, _ = _encontrar_fbclient_dll(ods_major)
-    if not dll_principal:
+    dll = _encontrar_fbclient_dll(ods_major)
+    if not dll:
         return None, (
             "fbclient.dll nao encontrada. "
             "Instale o Firebird ou copie fbclient.dll para C:\\FuturaFirebird\\FB\\"
         )
 
-    # Lista completa de DLLs para tentar (principal primeiro, depois as demais)
-    todas_dlls_ordenadas = (
-        _FB_DLL_CANDIDATOS["fb4"] +
-        _FB_DLL_CANDIDATOS["fb3"] +
-        _FB_DLL_CANDIDATOS["fb2"] +
-        _FB_DLL_CANDIDATOS["fallback"]
-    )
-    # Remove duplicatas mantendo ordem, coloca a principal na frente
-    vistas = set()
-    dlls_para_tentar: list[str] = []
-    for dll in [dll_principal] + todas_dlls_ordenadas:
-        if dll not in vistas and _dll_existe(dll):
-            vistas.add(dll)
-            dlls_para_tentar.append(dll)
+    try:
+        fdb.load_api(dll)
+    except Exception as e:
+        return None, f"Erro ao carregar fbclient.dll ({dll}): {e}"
 
-    erros_por_dll: list[str] = []
-    erro_ods_incompativel = False
-
-    for dll in dlls_para_tentar:
+    tentativas = [
+        {"host": "",          "database": path},
+        {"host": "localhost", "database": path},
+    ]
+    ultimo_erro = ""
+    for params in tentativas:
         try:
-            con = _conectar_fdb(dll, path, user, password)
+            con = fdb.connect(
+                host=params["host"], database=params["database"],
+                user=user, password=password,
+            )
             cur = con.cursor()
             cur.execute("SELECT BUILD_BD, BUILD_EXE, VERSAO, CI FROM PARAMETROS")
             row = cur.fetchone()
@@ -272,44 +310,11 @@ def _consultar_parametros(
                 "versao":    str(row[2]).strip() if row[2] is not None else "",
                 "ci":        str(row[3]).strip() if row[3] is not None else "",
             }, ""
-
         except Exception as e:
-            msg = str(e)
-            erros_por_dll.append(f"{os.path.basename(os.path.dirname(dll))}: {msg}")
+            ultimo_erro = str(e)
+            continue
 
-            # Detecta SQLCODE -820: DLL não suporta o ODS do banco
-            if "-820" in msg or "unsupported on-disk structure" in msg.lower():
-                erro_ods_incompativel = True
-                continue  # Tenta próxima DLL
-            else:
-                # Erro de outro tipo (autenticação, arquivo em uso, etc.)
-                # Continua tentando mas registra
-                continue
-
-    # Nenhuma DLL funcionou — monta mensagem clara
-    if erro_ods_incompativel:
-        versao_banco = _ODS_MINOR_MAP.get(
-            (ods_major, 0),
-            _ODS_MAP.get(ods_major, f"ODS {ods_major}")
-        )
-        dlls_disponiveis = [
-            os.path.dirname(d) for d in dlls_para_tentar
-            if "system32" not in d.lower() and "syswow64" not in d.lower()
-        ]
-        if dlls_disponiveis:
-            msg_dlls = f"DLLs encontradas: {', '.join(dlls_disponiveis)}"
-        else:
-            msg_dlls = "Nenhuma instalacao do Firebird compativel encontrada."
-        return None, (
-            f"Banco criado com {versao_banco} (ODS {ods_major}), "
-            f"mas nenhuma fbclient.dll instalada suporta essa versao.\n"
-            f"{msg_dlls}\n"
-            f"Instale o Firebird {versao_banco} em C:\\FuturaFirebird\\FB{ods_major - 9}\\ "
-            f"ou em C:\\Program Files\\Firebird\\Firebird_{ods_major - 9}_0\\"
-        )
-
-    # Erro genérico — retorna o último erro
-    return None, erros_por_dll[-1] if erros_por_dll else "Erro desconhecido ao conectar."
+    return None, ultimo_erro
 
 
 # =============================================================================
@@ -317,6 +322,8 @@ def _consultar_parametros(
 # =============================================================================
 
 def _encontrar_fb_dir() -> str | None:
+    """Retorna o diretório do Firebird que contém gfix.exe."""
+
     def _tem_gfix(pasta: str) -> bool:
         return os.path.isfile(os.path.join(pasta, "gfix.exe"))
 
@@ -433,24 +440,6 @@ def _validar_com_gfix(path: str, user: str, password: str) -> dict:
             resultado["ok"] = True
             return resultado
 
-        # Detecta erro de ODS incompatível no gfix também
-        if "-820" in saida or "unsupported on-disk structure" in saida.lower():
-            ods_match = re.search(r"found (\d+\.\d+).*support (\d+\.\d+)", saida, re.IGNORECASE)
-            if ods_match:
-                encontrado  = ods_match.group(1)
-                suportado   = ods_match.group(2)
-                resultado["msg"] = (
-                    f"O gfix instalado nao suporta este banco (ODS {encontrado}). "
-                    f"O gfix atual suporta ate ODS {suportado}. "
-                    f"Instale o Firebird compativel com o banco para validar a integridade."
-                )
-            else:
-                resultado["msg"] = (
-                    "O gfix instalado e incompativel com a versao deste banco. "
-                    "Instale o Firebird correto para validar a integridade."
-                )
-            return resultado
-
         for linha in saida.splitlines():
             l  = linha.strip()
             ll = l.lower()
@@ -497,7 +486,9 @@ def _verificar_header(path: str, page_size: int) -> dict:
             )
             resultado["ok"] = False
         else:
-            resultado["detalhes"].append(f"Paginas: {tamanho // page_size:,} (multiplo correto)")
+            resultado["detalhes"].append(
+                f"Paginas: {tamanho // page_size:,} (multiplo correto)"
+            )
 
         with open(path, "rb") as f:
             hdr = f.read(min(page_size, 512))
@@ -527,6 +518,39 @@ def verificar_versao_fdb(
     password: str    = "sbofutura",
     rodar_gfix: bool = True,
 ) -> dict:
+    """
+    Lê o cabeçalho binário do .fdb, consulta BUILD_BD, BUILD_EXE, VERSAO e CI
+    via fdb e opcionalmente roda gfix -validate.
+
+    Retorna dict com:
+        ok                  : bool
+        ods_major           : int
+        ods_minor           : int
+        versao_arquivo      : str   — versão Firebird que criou o banco
+        versao_instalada    : str   — versão Firebird instalada na máquina
+        page_size           : int
+        header_ok           : bool
+        header_erros        : list[str]
+        header_detalhes     : list[str]
+        gfix_executado      : bool
+        gfix_ok             : bool
+        gfix_erros          : list[str]
+        gfix_avisos         : list[str]
+        gfix_saida_bruta    : str
+        gfix_msg            : str
+        build_bd            : int   — SELECT BUILD_BD FROM PARAMETROS
+        build_exe           : int   — SELECT BUILD_EXE FROM PARAMETROS
+        versao_campo        : str   — valor descriptografado de VERSAO (ou "" se falhar)
+        versao_campo_erro   : str   — erro ao descriptografar VERSAO (se houver)
+        versao_futura       : str   — versão final exibida (VERSAO descriptografado
+                                      ou fallback por BUILD_BD)
+        versao_futura_est   : bool  — True se estimado por BUILD_BD, False se via VERSAO
+        versao_futura_erro  : str   — erro ao consultar/calcular versão (se houver)
+        ci                  : str   — valor bruto de SELECT CI FROM PARAMETROS
+        id_cliente          : str   — ID do cliente calculado (ex: "12584")
+        id_cliente_erro     : str   — erro ao consultar CI (se houver)
+        erro                : str   — erro geral (arquivo não encontrado, etc.)
+    """
     result = {
         "ok":                False,
         "ods_major":         0,
@@ -545,7 +569,10 @@ def verificar_versao_fdb(
         "gfix_msg":          "",
         "build_bd":          0,
         "build_exe":         0,
+        "versao_campo":      "",
+        "versao_campo_erro": "",
         "versao_futura":     "",
+        "versao_futura_est": False,
         "versao_futura_erro": "",
         "ci":                "",
         "id_cliente":        "",
@@ -553,6 +580,7 @@ def verificar_versao_fdb(
         "erro":              "",
     }
 
+    # -- Validações básicas --------------------------------------------------
     if not path:
         result["erro"] = "Nenhum arquivo informado."
         return result
@@ -566,6 +594,7 @@ def verificar_versao_fdb(
         result["erro"] = f"Extensao nao reconhecida: '{ext}'. Use .fdb, .gdb ou .db"
         return result
 
+    # -- Leitura do header binário -------------------------------------------
     try:
         with open(path, "rb") as f:
             data = f.read(128)
@@ -603,12 +632,16 @@ def verificar_versao_fdb(
             "erros": [], "avisos": [], "saida_bruta": "", "msg": "",
         }
 
+        # -- Consulta única: BUILD_BD, BUILD_EXE, VERSAO, CI -----------------
         params_data, params_erro = _consultar_parametros(path, user, password, ods_major)
 
-        build_bd           = 0
-        build_exe          = 0
-        ci_raw             = ""
-        versao_futura      = ""
+        build_bd  = 0
+        build_exe = 0
+        ci_raw    = ""
+        versao_campo      = ""
+        versao_campo_erro = ""
+        versao_futura     = ""
+        versao_futura_est = False
         versao_futura_erro = params_erro
 
         if params_data:
@@ -616,19 +649,31 @@ def verificar_versao_fdb(
             build_exe = params_data["build_exe"]
             ci_raw    = params_data["ci"]
 
+            # -- Descriptografar campo VERSAO --------------------------------
             versao_raw = params_data["versao"]
             if versao_raw:
                 try:
-                    versao_futura      = decrypt_aes(versao_raw)
-                    versao_futura_erro = ""
+                    versao_campo = decrypt_aes(versao_raw)
                 except ImportError as e:
-                    versao_futura_erro = str(e)
+                    versao_campo_erro = str(e)
                 except Exception as e:
-                    versao_futura_erro = f"Erro ao descriptografar VERSAO: {e}"
+                    versao_campo_erro = f"Erro ao descriptografar VERSAO: {e}"
             else:
-                versao_futura_erro = "Campo VERSAO vazio em PARAMETROS."
+                versao_campo_erro = "Campo VERSAO vazio em PARAMETROS."
 
-        id_cliente      = ci_para_id_cliente(ci_raw) if ci_raw else ""
+            # -- Versão final: VERSAO descriptografado ou fallback BUILD_BD --
+            if versao_campo:
+                versao_futura     = versao_campo
+                versao_futura_est = False
+                versao_futura_erro = ""
+            elif build_bd:
+                versao_futura, versao_futura_est = _build_para_versao_futura(build_bd)
+                versao_futura_erro = versao_campo_erro  # informa por que usou fallback
+            else:
+                versao_futura_erro = versao_campo_erro or params_erro
+
+        # -- ID do Cliente ---------------------------------------------------
+        id_cliente     = ci_para_id_cliente(ci_raw) if ci_raw else ""
         id_cliente_erro = "" if ci_raw else (params_erro or "CI nao disponivel.")
 
         result.update({
@@ -649,7 +694,10 @@ def verificar_versao_fdb(
             "gfix_msg":          gfix["msg"],
             "build_bd":          build_bd,
             "build_exe":         build_exe,
+            "versao_campo":      versao_campo,
+            "versao_campo_erro": versao_campo_erro,
             "versao_futura":     versao_futura,
+            "versao_futura_est": versao_futura_est,
             "versao_futura_erro": versao_futura_erro,
             "ci":                ci_raw,
             "id_cliente":        id_cliente,
