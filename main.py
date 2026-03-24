@@ -673,46 +673,14 @@ class MainWindow(QMainWindow):
         self._stack = FadeStackedWidget()
         root.addWidget(self._stack)
 
-        self._page_menu                 = PageMenu()
-        self._page_scan                 = PageScan()
-        self._page_atalhos              = PageAtalhos()
-        self._page_terminal             = PageTerminal()
-        self._page_restaurar            = PageRestaurar()
-        self._page_log                  = PageLog()
-        self._page_atualizacao          = PageAtualizacao()
-        self._page_backup_gbak          = PageBackupGbak()
-        self._page_port_opener          = PagePortOpener()
-        self._page_diagnostico          = PageDiagnostico()
-        self._page_editar_func          = PageEditarFuncionario()
-        self._page_implantar_mobile     = PageImplantarMobile()
-        self._page_shutdown_online      = PageShutdownOnline()
-        self._page_utilitarios          = PageUtilitarios()
-        self._page_instalar_firebird    = PageInstalarFirebird()
-        self._page_verificar_versao_fdb = PageVerificarVersaoFdb()
-        self._page_fb_portable          = PageFbPortable()
+        self._pages_map: dict[int, QWidget] = {}
+        
+        # Cria apenas o Menu inicial de forma fixa para ser imediato
+        self._page_menu = PageMenu()
+        self._stack.addWidget(self._page_menu)
+        self._pages_map[_IDX_MENU] = self._page_menu
 
-        for p in [
-            self._page_menu,                 # 0
-            self._page_scan,                 # 1
-            self._page_atalhos,              # 2
-            self._page_terminal,             # 3
-            self._page_restaurar,            # 4
-            self._page_log,                  # 5
-            self._page_atualizacao,          # 6
-            self._page_backup_gbak,          # 7
-            self._page_port_opener,          # 8
-            self._page_diagnostico,          # 9
-            self._page_editar_func,          # 10
-            self._page_implantar_mobile,     # 11
-            self._page_shutdown_online,      # 12
-            self._page_utilitarios,          # 13
-            self._page_instalar_firebird,    # 14
-            self._page_verificar_versao_fdb, # 15
-            self._page_fb_portable,          # 16
-        ]:
-            self._stack.addWidget(p)
-
-        # -- Sinais do menu principal --
+        # -- Conecta sinais do menu principal (serão re-conectados no get_page se necessário) --
         self._page_menu.go_atalhos.connect(self._start_atalhos)
         self._page_menu.go_terminal.connect(self._start_terminal)
         self._page_menu.go_atualizacao.connect(self._go_atualizacao)
@@ -721,35 +689,6 @@ class MainWindow(QMainWindow):
         self._page_menu.go_instalar_firebird.connect(self._go_instalar_firebird)
         self._page_menu.go_fb_portable.connect(self._go_fb_portable)
 
-        # -- Sinais da página Utilitários --
-        self._page_utilitarios.go_log.connect(self._go_log)
-        self._page_utilitarios.go_backup_gbak.connect(self._go_backup_gbak)
-        self._page_utilitarios.go_port_opener.connect(self._go_port_opener)
-        self._page_utilitarios.go_diagnostico.connect(self._go_diagnostico)
-        self._page_utilitarios.go_editar_func.connect(self._go_editar_func)
-        self._page_utilitarios.go_implantar_mobile.connect(self._go_implantar_mobile)
-        self._page_utilitarios.go_shutdown_online.connect(self._go_shutdown_online)
-        self._page_utilitarios.go_verificar_versao_fdb.connect(self._go_verificar_versao_fdb)
-
-        # -- Sinais do scan --
-        self._page_scan.servidor_selecionado.connect(self._on_servidor)
-        self._page_scan.cancelado.connect(self._go_menu)
-
-        # -- Sinais de retorno (go_menu) --
-        self._page_atalhos.go_menu.connect(self._go_menu)
-        self._page_terminal.go_menu.connect(self._go_menu)
-        self._page_restaurar.go_menu.connect(self._go_menu)
-        self._page_log.go_menu.connect(self._go_menu)
-        self._page_atualizacao.go_menu.connect(self._go_menu)
-        self._page_backup_gbak.go_menu.connect(self._go_utilitarios)
-        self._page_port_opener.go_menu.connect(self._go_utilitarios)
-        self._page_diagnostico.go_menu.connect(self._go_utilitarios)
-        self._page_editar_func.go_menu.connect(self._go_utilitarios)
-        self._page_implantar_mobile.go_menu.connect(self._go_utilitarios)
-        self._page_shutdown_online.go_menu.connect(self._go_utilitarios)
-        self._page_instalar_firebird.go_menu.connect(self._go_menu)
-        self._page_verificar_versao_fdb.go_menu.connect(self._go_utilitarios)
-        self._page_fb_portable.go_menu.connect(self._go_menu)
 
         # -- Sidebar clicks --
         self._sidebar.nav_menu.on_click(lambda: self._navigate(self._go_menu))
@@ -766,10 +705,6 @@ class MainWindow(QMainWindow):
             )
         )
 
-        theme_manager.theme_changed.connect(
-            lambda _: self._stack.setStyleSheet(f"background: {COLORS['bg']};")
-        )
-
         self._flow_mode   = None
         self._close_guard = False
 
@@ -779,8 +714,8 @@ class MainWindow(QMainWindow):
         self._busy_timer.start()
 
         self._page_nav_map: dict = {}
-
         self._go_menu()
+
 
         log.section(
             f"FUTURA SETUP v{APP_VERSION} INICIADO — "
@@ -809,20 +744,8 @@ class MainWindow(QMainWindow):
 
     @property
     def _worker_pages(self):
-        return [
-            self._page_atalhos,
-            self._page_terminal,
-            self._page_atualizacao,
-            self._page_restaurar,
-            self._page_backup_gbak,
-            self._page_port_opener,
-            self._page_editar_func,
-            self._page_implantar_mobile,
-            self._page_shutdown_online,
-            self._page_instalar_firebird,
-            self._page_verificar_versao_fdb,
-            self._page_fb_portable,
-        ]
+        # Apenas as páginas que já foram instanciadas podem ter workers
+        return list(self._pages_map.values())
 
     def _get_active_workers(self) -> list:
         result = []
@@ -831,6 +754,7 @@ class MainWindow(QMainWindow):
             if worker and hasattr(worker, "isRunning") and worker.isRunning():
                 result.append(worker)
         return result
+
 
     def _worker_rodando(self) -> bool:
         return bool(self._get_active_workers())
@@ -846,29 +770,34 @@ class MainWindow(QMainWindow):
     def _get_page_nav_map(self) -> dict:
         if not self._page_nav_map:
             self._page_nav_map = {
-                self._page_atalhos:              self._sidebar.nav_atalhos,
-                self._page_terminal:             self._sidebar.nav_terminal,
-                self._page_atualizacao:          self._sidebar.nav_atualizacao,
-                self._page_backup_gbak:          self._sidebar.nav_utilitarios,
-                self._page_port_opener:          self._sidebar.nav_utilitarios,
-                self._page_editar_func:          self._sidebar.nav_utilitarios,
-                self._page_implantar_mobile:     self._sidebar.nav_utilitarios,
-                self._page_shutdown_online:      self._sidebar.nav_utilitarios,
-                self._page_instalar_firebird:    self._sidebar.nav_menu,
-                self._page_verificar_versao_fdb: self._sidebar.nav_utilitarios,
-                self._page_fb_portable:          self._sidebar.nav_menu,
+                # Mapeia ID da página para o NavItem correspondente
+                _IDX_ATALHOS:              self._sidebar.nav_atalhos,
+                _IDX_TERMINAL:             self._sidebar.nav_terminal,
+                _IDX_ATUALIZACAO:          self._sidebar.nav_atualizacao,
+                _IDX_BACKUP_GBAK:          self._sidebar.nav_utilitarios,
+                _IDX_PORT_OPENER:          self._sidebar.nav_utilitarios,
+                _IDX_EDITAR_FUNC:          self._sidebar.nav_utilitarios,
+                _IDX_IMPLANTAR_MOBILE:     self._sidebar.nav_utilitarios,
+                _IDX_SHUTDOWN_ONLINE:      self._sidebar.nav_utilitarios,
+                _IDX_INSTALAR_FIREBIRD:    self._sidebar.nav_menu,
+                _IDX_VERIFICAR_VERSAO_FDB: self._sidebar.nav_utilitarios,
+                _IDX_FB_PORTABLE:          self._sidebar.nav_menu,
             }
         return self._page_nav_map
 
     def _spin_tick(self):
         nav_map = self._get_page_nav_map()
-        for page, nav in nav_map.items():
+        for idx, nav in nav_map.items():
+            page = self._pages_map.get(idx)
+            if not page: continue
+            
             worker = getattr(page, "_worker", None)
             is_running = bool(worker and hasattr(worker, "isRunning") and worker.isRunning())
             if nav._busy != is_running:
                 nav.set_busy(is_running)
             elif is_running:
                 nav._spin_tick()
+
 
     # -- GUARD DIALOG ----------------------------------------------------------
 
@@ -889,79 +818,178 @@ class MainWindow(QMainWindow):
 
     # -- NAVEGACAO -------------------------------------------------------------
 
+    def _get_page(self, idx: int) -> QWidget:
+        """Cria e retorna a instância da página de forma lazy."""
+        if idx in self._pages_map:
+            return self._pages_map[idx]
+        
+        page = None
+        if idx == _IDX_SCAN:
+            page = PageScan()
+            page.servidor_selecionado.connect(self._on_servidor)
+            page.cancelado.connect(self._go_menu)
+        elif idx == _IDX_ATALHOS:
+            page = PageAtalhos()
+            page.go_menu.connect(self._go_menu)
+        elif idx == _IDX_TERMINAL:
+            page = PageTerminal()
+            page.go_menu.connect(self._go_menu)
+        elif idx == _IDX_RESTAURAR:
+            page = PageRestaurar()
+            page.go_menu.connect(self._go_menu)
+        elif idx == _IDX_LOG:
+            page = PageLog()
+            page.go_menu.connect(self._go_menu)
+        elif idx == _IDX_ATUALIZACAO:
+            page = PageAtualizacao()
+            page.go_menu.connect(self._go_menu)
+        elif idx == _IDX_BACKUP_GBAK:
+            page = PageBackupGbak()
+            page.go_menu.connect(self._go_utilitarios)
+        elif idx == _IDX_PORT_OPENER:
+            page = PagePortOpener()
+            page.go_menu.connect(self._go_utilitarios)
+        elif idx == _IDX_DIAGNOSTICO:
+            page = PageDiagnostico()
+            page.go_menu.connect(self._go_utilitarios)
+        elif idx == _IDX_EDITAR_FUNC:
+            page = PageEditarFuncionario()
+            page.go_menu.connect(self._go_utilitarios)
+        elif idx == _IDX_IMPLANTAR_MOBILE:
+            page = PageImplantarMobile()
+            page.go_menu.connect(self._go_utilitarios)
+        elif idx == _IDX_SHUTDOWN_ONLINE:
+            page = PageShutdownOnline()
+            page.go_menu.connect(self._go_utilitarios)
+        elif idx == _IDX_UTILITARIOS:
+            page = PageUtilitarios()
+            page.go_log.connect(self._go_log)
+            page.go_backup_gbak.connect(self._go_backup_gbak)
+            page.go_port_opener.connect(self._go_port_opener)
+            page.go_diagnostico.connect(self._go_diagnostico)
+            page.go_editar_func.connect(self._go_editar_func)
+            page.go_implantar_mobile.connect(self._go_implantar_mobile)
+            page.go_shutdown_online.connect(self._go_shutdown_online)
+            page.go_verificar_versao_fdb.connect(self._go_verificar_versao_fdb)
+            page.go_menu.connect(self._go_menu)
+        elif idx == _IDX_INSTALAR_FIREBIRD:
+            page = PageInstalarFirebird()
+            page.go_menu.connect(self._go_menu)
+        elif idx == _IDX_VERIFICAR_VERSAO_FDB:
+            page = PageVerificarVersaoFdb()
+            page.go_menu.connect(self._go_utilitarios)
+        elif idx == _IDX_FB_PORTABLE:
+            page = PageFbPortable()
+            page.go_menu.connect(self._go_menu)
+
+        if page:
+            # Insere no stack na posição correta (usamos placeholders se necessário)
+            # Para simplificar, como o stack é indexado, garantimos que ele tenha o tamanho certo
+            while self._stack.count() <= idx:
+                self._stack.addWidget(QWidget()) # Placeholder
+            
+            # Substitui placeholder ou adiciona
+            old = self._stack.widget(idx)
+            self._stack.removeWidget(old)
+            if old: old.deleteLater()
+            
+            self._stack.insertWidget(idx, page)
+            self._pages_map[idx] = page
+            return page
+        
+        return QWidget()
+
     def _go_menu(self):
         self._show(_IDX_MENU, self._sidebar.nav_menu)
 
     def _go_utilitarios(self):
+        self._get_page(_IDX_UTILITARIOS) # Garante que existe
         self._show(_IDX_UTILITARIOS, self._sidebar.nav_utilitarios)
 
     def _go_log(self):
-        self._page_log.load_log()
+        p = self._get_page(_IDX_LOG)
+        p.load_log()
         self._show(_IDX_LOG, self._sidebar.nav_utilitarios)
 
     def _go_restaurar(self):
-        self._page_restaurar.load_backups()
+        p = self._get_page(_IDX_RESTAURAR)
+        p.load_backups()
         self._show(_IDX_RESTAURAR, self._sidebar.nav_menu)
 
     def _go_atualizacao(self):
-        self._page_atualizacao.reset()
+        p = self._get_page(_IDX_ATUALIZACAO)
+        p.reset()
         self._show(_IDX_ATUALIZACAO, self._sidebar.nav_atualizacao)
 
     def _go_backup_gbak(self):
-        self._page_backup_gbak.reset()
+        p = self._get_page(_IDX_BACKUP_GBAK)
+        p.reset()
         self._show(_IDX_BACKUP_GBAK, self._sidebar.nav_utilitarios)
 
     def _go_port_opener(self):
-        self._page_port_opener.reset()
+        p = self._get_page(_IDX_PORT_OPENER)
+        p.reset()
         self._show(_IDX_PORT_OPENER, self._sidebar.nav_utilitarios)
 
     def _go_diagnostico(self):
-        self._page_diagnostico.reset()
+        p = self._get_page(_IDX_DIAGNOSTICO)
+        p.reset()
         self._show(_IDX_DIAGNOSTICO, self._sidebar.nav_utilitarios)
 
     def _go_editar_func(self):
-        self._page_editar_func.reset()
+        p = self._get_page(_IDX_EDITAR_FUNC)
+        p.reset()
         self._show(_IDX_EDITAR_FUNC, self._sidebar.nav_utilitarios)
 
     def _go_implantar_mobile(self):
-        self._page_implantar_mobile.reset()
+        p = self._get_page(_IDX_IMPLANTAR_MOBILE)
+        p.reset()
         self._show(_IDX_IMPLANTAR_MOBILE, self._sidebar.nav_utilitarios)
 
     def _go_shutdown_online(self):
-        self._page_shutdown_online.reset()
+        p = self._get_page(_IDX_SHUTDOWN_ONLINE)
+        p.reset()
         self._show(_IDX_SHUTDOWN_ONLINE, self._sidebar.nav_utilitarios)
 
     def _go_instalar_firebird(self):
-        self._page_instalar_firebird.reset()
+        p = self._get_page(_IDX_INSTALAR_FIREBIRD)
+        p.reset()
         self._show(_IDX_INSTALAR_FIREBIRD, self._sidebar.nav_menu)
 
     def _go_verificar_versao_fdb(self):
-        self._page_verificar_versao_fdb.reset()
+        p = self._get_page(_IDX_VERIFICAR_VERSAO_FDB)
+        p.reset()
         self._show(_IDX_VERIFICAR_VERSAO_FDB, self._sidebar.nav_utilitarios)
 
     def _go_fb_portable(self):
-        self._page_fb_portable.reset()
+        p = self._get_page(_IDX_FB_PORTABLE)
+        p.reset()
         self._show(_IDX_FB_PORTABLE, self._sidebar.nav_menu)
 
     def _start_atalhos(self):
         self._flow_mode = "atalhos"
-        self._page_scan.reset()
+        p = self._get_page(_IDX_SCAN)
+        p.reset()
         self._show(_IDX_SCAN, self._sidebar.nav_menu)
 
     def _start_terminal(self):
         self._flow_mode = "terminal"
-        self._page_scan.reset()
+        p = self._get_page(_IDX_SCAN)
+        p.reset()
         self._show(_IDX_SCAN, self._sidebar.nav_menu)
 
     def _on_servidor(self, servidor):
         log.prefs.add_servidor(servidor.ip, servidor.hostname, servidor.path)
         self._sidebar.unlock_modes()
         if self._flow_mode == "atalhos":
-            self._page_atalhos.set_servidor(servidor)
+            p = self._get_page(_IDX_ATALHOS)
+            p.set_servidor(servidor)
             self._show(_IDX_ATALHOS, self._sidebar.nav_atalhos)
         else:
-            self._page_terminal.set_servidor(servidor)
+            p = self._get_page(_IDX_TERMINAL)
+            p.set_servidor(servidor)
             self._show(_IDX_TERMINAL, self._sidebar.nav_terminal)
+
 
     def _show(self, idx: int, nav: NavItem):
         self._stack.setCurrentIndex(idx)

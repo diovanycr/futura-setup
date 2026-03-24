@@ -409,19 +409,27 @@ def _consultar_parametros(
     except ImportError:
         return None, "Modulo 'fdb' nao instalado. Execute: pip install fdb", None
 
-    # Lista completa de DLLs para tentar (local primeiro por seguranca)
-    todas_dlls_ordenadas = (
-        _FB_DLL_CANDIDATOS["fb4"] +
-        _FB_DLL_CANDIDATOS["fb3"] +
-        _FB_DLL_CANDIDATOS.get("fb2", []) +
-        _FB_DLL_CANDIDATOS.get("fallback", [])
-    )
+    # 1. Filtra as DLLs candidatas com base no ODS do banco para ganhar velocidade
+    # Se o banco e ODS 13 (FB4), tenta FB4 primeiro.
+    # Se o banco e ODS 12 (FB3), pula FB4 e vai direto para FB3.
+    target_list = []
+    if ods_major >= 13:
+        target_list = _FB_DLL_CANDIDATOS["fb4"] + _FB_DLL_CANDIDATOS.get("fallback", [])
+    elif ods_major == 12:
+        target_list = _FB_DLL_CANDIDATOS["fb3"] + _FB_DLL_CANDIDATOS.get("fallback", [])
+    elif ods_major <= 11 and ods_major > 0:
+        target_list = _FB_DLL_CANDIDATOS.get("fb2", []) + _FB_DLL_CANDIDATOS.get("fallback", [])
+    else:
+        # Se ODS desconhecido, tenta tudo na ordem padrao
+        target_list = (
+            _FB_DLL_CANDIDATOS["fb4"] + 
+            _FB_DLL_CANDIDATOS["fb3"] + 
+            _FB_DLL_CANDIDATOS.get("fallback", [])
+        )
 
-    ultima_msg = "Nenhuma DLL suporta este banco ou caminho invalido."
+    ultima_msg = "Nenhuma DLL compativel encontrada para este banco."
 
-    ultima_msg = "Nenhuma DLL suporta este banco ou caminho invalido."
-
-    for dll in todas_dlls_ordenadas:
+    for dll in target_list:
         if not os.path.isfile(dll):
             continue
 

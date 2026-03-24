@@ -1481,15 +1481,15 @@ def fb4_obter_modo()      -> str:  return fb_obter_modo("4")
 # =============================================================================
 
 def _processo_rodando(versao: str) -> bool:
-    proc = _processos.get(versao)
-    if proc is not None and proc.poll() is None:
+    v_proc = _processos.get(versao)
+    if v_proc is not None and v_proc.poll() is None:
         return True
     fb_dir = FB_CONFIGS[versao]["dir"].lower()
-    for proc in psutil.process_iter(['name', 'exe']):
+    for p in psutil.process_iter(['name']):
         try:
-            if proc.info['name'].lower() in _SERVIDOR_CANDIDATOS:
-                exe = proc.info['exe']
-                if exe and fb_dir in exe.lower():
+            if p.info['name'].lower() in _SERVIDOR_CANDIDATOS:
+                exe_p = p.exe()
+                if exe_p and fb_dir in exe_p.lower():
                     return True
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
