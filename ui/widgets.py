@@ -306,7 +306,7 @@ class PageHeader(QWidget):
     """Cabeçalho padronizado com Título, Subtítulo e botão VOLTAR."""
     back_clicked = pyqtSignal()
 
-    def __init__(self, title: str, subtitle: str = "", parent=None):
+    def __init__(self, title: str, subtitle: str = "", back_visible: bool = True, parent=None):
         super().__init__(parent)
         self.setObjectName("page_header")
         
@@ -335,6 +335,8 @@ class PageHeader(QWidget):
         # Botão Voltar (Direita)
         self._btn_back = make_secondary_btn("VOLTAR", 80)
         self._btn_back.clicked.connect(self.back_clicked.emit)
+        if not back_visible:
+            self._btn_back.hide()
         lay.addWidget(self._btn_back, 0, Qt.AlignmentFlag.AlignVCenter)
 
         self._upd()

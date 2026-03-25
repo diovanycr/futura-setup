@@ -84,6 +84,7 @@ class MainWindow(QMainWindow):
             try:
                 page.go_instalar_firebird.connect(self._go_instalar_firebird)
                 page.go_fb_portable.connect(self._go_fb_portable)
+                page.go_utilitarios.connect(self._go_utilitarios)
             except AttributeError: pass
 
         elif idx == IDX_UTILITARIOS:

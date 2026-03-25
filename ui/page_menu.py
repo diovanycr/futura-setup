@@ -155,6 +155,7 @@ class PageMenu(QWidget):
     go_restaurar         = pyqtSignal()
     go_instalar_firebird = pyqtSignal()
     go_fb_portable       = pyqtSignal()
+    go_utilitarios       = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -237,5 +238,21 @@ class PageMenu(QWidget):
         grid_fb.addWidget(card_instalar, 0, 0)
         grid_fb.addWidget(card_portable, 0, 1)
 
-        lay.addLayout(grid_fb)
-        lay.addStretch()
+        content_lay.addLayout(grid_fb)
+        content_lay.addWidget(spacer(h=24))
+
+        # Secao: Utilitarios
+        content_lay.addWidget(SectionLabel("UTILITARIOS"))
+        content_lay.addWidget(spacer(h=6))
+
+        card_util = ActionCard(
+            "06", "Ferramentas",
+            "Logs, Backup, Firewall, Diagnostico e mais",
+            COLORS["accent2"],
+        )
+        card_util.clicked.connect(self.go_utilitarios.emit)
+        content_lay.addWidget(card_util)
+
+        content_lay.addStretch()
+
+        root.addWidget(content_w, 1)
