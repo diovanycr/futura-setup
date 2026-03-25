@@ -508,16 +508,20 @@ class _ToggleRow(QWidget):
         """)
 
     def set_estado(self, ativo: bool, instalado: bool, detalhe: str = ""):
-        cor = self._cor if ativo else COLORS.get("text_dim", "#888")
-        self._dot.setStyleSheet(f"background:{cor}; border-radius:5px;")
-        self._lbl_titulo.setStyleSheet(
-            f"color:{COLORS.get('text')}; background:transparent; border:none;"
-        )
-        if not instalado:
-            self._lbl_detalhe.setText("Não instalado — use o painel abaixo para instalar")
-        elif detalhe:
-            self._lbl_detalhe.setText(detalhe)
-        self._set_badge(ativo)
+        try:
+            cor = self._cor if ativo else COLORS.get("text_dim", "#888")
+            self._dot.setStyleSheet(f"background:{cor}; border-radius:5px;")
+            self._lbl_titulo.setStyleSheet(
+                f"color:{COLORS.get('text')}; background:transparent; border:none;"
+            )
+            if not instalado:
+                self._lbl_detalhe.setText("Não instalado — use o painel abaixo para instalar")
+            elif detalhe:
+                self._lbl_detalhe.setText(detalhe)
+            self._set_badge(ativo)
+        except RuntimeError:
+            # Widget já foi destruído pelo Qt; ignora
+            pass
 
     def _set_badge(self, ativo: bool):
         if ativo:
@@ -1638,69 +1642,75 @@ class _StatusDashboard(QFrame):
         theme_manager.theme_changed.connect(lambda _: self._upd_style())
 
     def atualizar(self, st: dict):
-        for v in ("3", "4"):
-            d = st[f"fb{v}"]
-            rodando = d["rodando"]
-            instalado = d["instalado"]
-            
-            # Visibilidade dos botões
-            self._boxes[v]["btn_start"].setVisible(not rodando and instalado)
-            self._boxes[v]["btn_stop"].setVisible(rodando)
-            self._boxes[v]["btn_restart"].setVisible(rodando)
-            
-            if rodando:
-                self._boxes[v]["status"].setText("Ativo")
-                self._boxes[v]["icon"].setText("🟢")
-            elif instalado:
-                self._boxes[v]["status"].setText("Inativo")
-                self._boxes[v]["icon"].setText("🔴")
-            else:
-                self._boxes[v]["status"].setText("Não instalado")
-                self._boxes[v]["icon"].setText("⚪")
+        try:
+            for v in ("3", "4"):
+                d = st[f"fb{v}"]
+                rodando = d["rodando"]
+                instalado = d["instalado"]
+                
+                # Visibilidade dos botões
+                self._boxes[v]["btn_start"].setVisible(not rodando and instalado)
+                self._boxes[v]["btn_stop"].setVisible(rodando)
+                self._boxes[v]["btn_restart"].setVisible(rodando)
+                
+                if rodando:
+                    self._boxes[v]["status"].setText("Ativo")
+                    self._boxes[v]["icon"].setText("🟢")
+                elif instalado:
+                    self._boxes[v]["status"].setText("Inativo")
+                    self._boxes[v]["icon"].setText("🔴")
+                else:
+                    self._boxes[v]["status"].setText("Não instalado")
+                    self._boxes[v]["icon"].setText("⚪")
+        except RuntimeError:
+            pass
 
     def _upd_style(self):
-        bg    = COLORS.get('bg')
-        brd   = COLORS.get('border')
-        surf  = COLORS.get('surface', '#1e1e1e')
-        surf2 = COLORS.get('surface2', '#2a2a2a')
-        
-        self.setStyleSheet(f"""
-            QFrame#status_dashboard {{
-                background:{surf};
-                border:1px solid {brd};
-                border-radius:12px;
-            }}
-        """)
-        
-        for v in ("3", "4"):
-            acc = _COR[v]
-            self._boxes[v]["frame"].setStyleSheet(f"""
-                QFrame#dash_box_{v} {{
-                    background:{bg};
+        try:
+            bg    = COLORS.get('bg')
+            brd   = COLORS.get('border')
+            surf  = COLORS.get('surface', '#1e1e1e')
+            surf2 = COLORS.get('surface2', '#2a2a2a')
+            
+            self.setStyleSheet(f"""
+                QFrame#status_dashboard {{
+                    background:{surf};
                     border:1px solid {brd};
-                    border-radius:8px;
-                }}
-                QFrame#dash_box_{v}:hover {{
-                    border:1.5px solid {acc};
-                    background:{surf2};
+                    border-radius:12px;
                 }}
             """)
-            btn_style = f"""
-                QPushButton {{
-                    background: transparent;
-                    color: {acc};
-                    border: 1px solid {acc};
-                    border-radius: 4px;
-                    padding: 0px 4px;
-                }}
-                QPushButton:hover {{
-                    background: {acc};
-                    color: #fff;
-                }}
-            """
-            self._boxes[v]["btn_start"].setStyleSheet(btn_style)
-            self._boxes[v]["btn_stop"].setStyleSheet(btn_style)
-            self._boxes[v]["btn_restart"].setStyleSheet(btn_style)
+            
+            for v in ("3", "4"):
+                acc = _COR[v]
+                self._boxes[v]["frame"].setStyleSheet(f"""
+                    QFrame#dash_box_{v} {{
+                        background:{bg};
+                        border:1px solid {brd};
+                        border-radius:8px;
+                    }}
+                    QFrame#dash_box_{v}:hover {{
+                        border:1.5px solid {acc};
+                        background:{surf2};
+                    }}
+                """)
+                btn_style = f"""
+                    QPushButton {{
+                        background: transparent;
+                        color: {acc};
+                        border: 1px solid {acc};
+                        border-radius: 4px;
+                        padding: 0px 4px;
+                    }}
+                    QPushButton:hover {{
+                        background: {acc};
+                        color: #fff;
+                    }}
+                """
+                self._boxes[v]["btn_start"].setStyleSheet(btn_style)
+                self._boxes[v]["btn_stop"].setStyleSheet(btn_style)
+                self._boxes[v]["btn_restart"].setStyleSheet(btn_style)
+        except RuntimeError:
+            pass
 
 # =============================================================================
 # Página principal
@@ -2166,13 +2176,17 @@ class PageFbPortable(QWidget):
             if versao == "3" and d.get("servico_oficial_rod"):
                 det = f"Serviço oficial - porta {porta} - rodando"
 
-            row.set_estado(rodando, inst, det)
-            row.toggle.setChecked(rodando)
-            row.toggle.setAtivo(inst)
-            row.toggle.setToolTip(
-                "Ativar esta versão irá desativar a outra automaticamente."
-                if inst else ""
-            )
+            try:
+                row.set_estado(rodando, inst, det)
+                row.toggle.setChecked(rodando)
+                row.toggle.setAtivo(inst)
+                row.toggle.setToolTip(
+                    "Ativar esta versão irá desativar a outra automaticamente."
+                    if inst else ""
+                )
+            except RuntimeError:
+                # Widgets já destruídos; pula esta linha
+                continue
 
             card.atualizar(
                 instalado      = inst,

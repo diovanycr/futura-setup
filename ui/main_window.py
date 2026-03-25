@@ -109,6 +109,12 @@ class MainWindow(QMainWindow):
                 page.go_menu.connect(self._go_utilitarios)
             except AttributeError: pass
 
+        elif idx in (IDX_ATUALIZACAO, IDX_RESTAURAR, IDX_INSTALAR_FIREBIRD,
+                     IDX_FB_PORTABLE, IDX_ATALHOS, IDX_TERMINAL):
+            try:
+                page.go_menu.connect(self._go_menu)
+            except AttributeError: pass
+
     def _navigate(self, fn):
         """Helper para navegação com guarda de workers ativos."""
         if self._controller.is_worker_running():

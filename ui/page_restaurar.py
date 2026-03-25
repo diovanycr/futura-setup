@@ -390,7 +390,11 @@ class PageRestaurar(QWidget):
         lay.addWidget(self._confirm_box_w)
         lay.addWidget(spacer(h=8))
 
-        lay.addWidget(btn_row(btn_ok))
+        btn_cancelar = make_secondary_btn("CANCELAR", 120)
+        btn_cancelar.clicked.connect(lambda: self._stack.setCurrentIndex(0))
+        btn_ok = make_primary_btn("↺  CONFIRMAR RESTAURAÇÃO", 240)
+        btn_ok.clicked.connect(self._run_restore)
+        lay.addWidget(btn_row(btn_cancelar, btn_ok))
         lay.addStretch()
         return w
 
