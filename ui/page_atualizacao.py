@@ -191,9 +191,19 @@ class PageAtualizacao(QWidget):
         self._pasta_group: QButtonGroup | None = None
         self._banco_group: QButtonGroup | None = None
 
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(40, 36, 40, 36)
-        lay.setSpacing(0)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        self._header = PageHeader("ATUALIZAR SISTEMA", "Baixa e executa a atualização completa do ERP Futura")
+        self._header.back_clicked.connect(self._on_back_clicked)
+        root.addWidget(self._header)
+
+        # Container para o conteúdo original
+        content_w = QWidget()
+        content_lay = QVBoxLayout(content_w)
+        content_lay.setContentsMargins(40, 24, 40, 36)
+        content_lay.setSpacing(0)
 
 
         self._step_ind = StepIndicator(STEP_NAMES)
@@ -212,6 +222,10 @@ class PageAtualizacao(QWidget):
         self._stack.addWidget(self._build_step5())
 
         self._go_step(0)
+
+    def _on_back_clicked(self):
+        self.reset()
+        self.go_menu.emit()
 
     def reset(self):
         for w in (self._detect_pasta_worker, self._detect_banco_worker):

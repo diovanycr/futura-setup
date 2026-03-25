@@ -216,7 +216,13 @@ class PageTerminal(QWidget):
         lay.addWidget(spacer(h=16))
 
         # Botões
-        lay.addWidget(btn_row(btn_proximo))
+        btn_voltar = make_secondary_btn("VOLTAR", 120)
+        btn_voltar.clicked.connect(lambda: self._go_step(0))
+        
+        btn_proximo = make_primary_btn("▶  PRÓXIMO", 180)
+        btn_proximo.clicked.connect(lambda: self._go_step(2))
+        
+        lay.addWidget(btn_row(btn_voltar, btn_proximo))
         lay.addStretch()
 
         return w
@@ -259,7 +265,13 @@ class PageTerminal(QWidget):
             self._step3_lay.addWidget(box)
             self._step3_lay.addWidget(spacer(h=16))
 
-            self._step3_lay.addWidget(btn_row(btn_proximo))
+            btn_voltar = make_secondary_btn("VOLTAR", 120)
+            btn_voltar.clicked.connect(lambda: self._go_step(1))
+            
+            btn_proximo = make_primary_btn("▶  PRÓXIMO", 180)
+            btn_proximo.clicked.connect(lambda: self._go_step(3))
+
+            self._step3_lay.addWidget(btn_row(btn_voltar, btn_proximo))
         else:
             alert = AlertBox(
                 f"{len(self._processos)} processo(s) em execução na pasta de destino. "
@@ -279,7 +291,13 @@ class PageTerminal(QWidget):
 
             self._step3_lay.addWidget(spacer(h=16))
 
-            self._step3_lay.addWidget(btn_row(btn_encerrar))
+            btn_voltar = make_secondary_btn("VOLTAR", 120)
+            btn_voltar.clicked.connect(lambda: self._go_step(1))
+            
+            btn_encerrar = make_primary_btn("ENCERRAR E CONTINUAR", 220)
+            btn_encerrar.clicked.connect(self._encerrar_e_continuar)
+
+            self._step3_lay.addWidget(btn_row(btn_voltar, btn_encerrar))
 
         self._step3_lay.addStretch()
 
@@ -370,7 +388,13 @@ class PageTerminal(QWidget):
         lay.addWidget(self._dest_panel)
         lay.addWidget(spacer(h=15))
 
-        lay.addWidget(btn_row(btn_copiar))
+        btn_voltar = make_secondary_btn("VOLTAR", 120)
+        btn_voltar.clicked.connect(lambda: self._go_step(1))
+
+        btn_copiar = make_primary_btn("▶  INICIAR CÓPIA", 180)
+        btn_copiar.clicked.connect(self._start_install)
+
+        lay.addWidget(btn_row(btn_voltar, btn_copiar))
 
         # Removido stretch final para evitar compressão dos itens superiores
         return w

@@ -156,6 +156,8 @@ class PageAtalhos(QWidget):
         scroll.setWidget(self._files_container)
         lay.addWidget(scroll, 1)  # stretch=1 — ocupa todo espaço restante
 
+        btn_proximo = make_primary_btn("PRÓXIMO", 120)
+        btn_proximo.clicked.connect(lambda: self._go_step(1))
         lay.addWidget(btn_row(btn_proximo))
         return w
 
@@ -205,7 +207,12 @@ class PageAtalhos(QWidget):
         lay.addWidget(self._dest_panel)
         lay.addWidget(spacer(h=16))
 
-        lay.addWidget(btn_row(btn_criar))
+        btn_voltar = make_secondary_btn("VOLTAR", 120)
+        btn_voltar.clicked.connect(lambda: self._go_step(0))
+        btn_criar = make_primary_btn("CRIAR ATALHOS", 160)
+        btn_criar.clicked.connect(self._run)
+
+        lay.addWidget(btn_row(btn_voltar, btn_criar))
         lay.addStretch()
         return w
 
