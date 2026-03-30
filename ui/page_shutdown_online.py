@@ -159,7 +159,6 @@ class _PathFieldDB(QWidget):
             QLineEdit:focus {{ border-color: {COLORS['accent']}; }}
         """)
 
-
     def _browse(self):
         path, _ = QFileDialog.getOpenFileName(
             self, "Selecionar banco de dados Firebird", "C:\\",
@@ -507,6 +506,8 @@ class _StepResultado(QWidget):
 
         self._root_lay.addWidget(h_line())
 
+        # ✅ CORRIGIDO: botão criado antes de ser usado
+        self._btn_nova = make_secondary_btn("NOVA OPERAÇÃO", 160)
         self._btn_nova.clicked.connect(self.nova_op.emit)
         self._root_lay.addWidget(btn_row(self._btn_nova))
 

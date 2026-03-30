@@ -2,15 +2,23 @@
 ui/page_backup_gbak.py - Pagina de Backup e Restaure via GBAK
 
 Fluxo da pagina:
-  Step 0  - Configuracao
+  Step 0  - Configuracao (com abas: Backup | Restaure)
   Step 1A - Execucao do Backup  (LogConsole + ProgressBlock)
   Step 1B - Execucao do Restaure (LogConsole + ProgressBlock)
   Step 2  - Resultado final
+
+Deteccao automatica de versao do Firebird:
+  - Ao selecionar o .fdb, le o ODS do cabecalho binario do arquivo
+  - ODS 11 -> Firebird 2.5 | ODS 12 -> Firebird 3.0 | ODS 13 -> Firebird 4.0 | ODS 14 -> Firebird 5.0
+  - Sugere automaticamente o diretorio do gbak compativel com a versao detectada
+  - Nao requer Firebird instalado para a deteccao
 """
 
 from __future__ import annotations
 
 import os
+import glob
+import struct
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTime
@@ -19,6 +27,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QFileDialog, QStackedWidget, QScrollArea,
     QDialog, QComboBox, QTimeEdit, QPushButton, QApplication,
+    QTabWidget,
 )
 
 from ui.theme import COLORS, FONT_SANS, FONT_MONO
@@ -42,18 +51,46 @@ from core.agendador_backup import criar_tarefa, remover_tarefa, tarefa_existe
 _DEFAULT_PASTA_DADOS  = r"C:\Futura\Dados"
 _DEFAULT_PASTA_BACKUP = r"C:\Futura\Backup"
 
+# Mapeamento ODS Major -> versao do Firebird
+_ODS_VERSAO_MAP = {
+    11: "Firebird 2.5",
+    12: "Firebird 3.0",
+    13: "Firebird 4.0",
+    14: "Firebird 5.0",
+}
 
+# Substrings para localizar o diretorio correto ao varrer a instalacao
+_VERSAO_DIR_HINT = {
+    "Firebird 2.5": ["2_5", "25", "2.5"],
+    "Firebird 3.0": ["3_0", "30", "3.0"],
+    "Firebird 4.0": ["4_0", "40", "4.0"],
+    "Firebird 5.0": ["5_0", "50", "5.0"],
+}
 
 
 # ---------------------------------------------------------------------------
-# Helper: deriva o caminho do banco restaurado a partir do .fdb de origem
+# Helper: le o ODS do cabecalho binario do .fdb sem precisar do Firebird
 # ---------------------------------------------------------------------------
+
+def _ler_ods_fdb(fdb_path: str) -> tuple[int, int] | None:
+    """Le os bytes ODS major/minor do cabecalho do .fdb."""
+    try:
+        with open(fdb_path, "rb") as f:
+            f.seek(16)
+            data = f.read(4)
+            if len(data) < 4:
+                return None
+            ods_major, ods_minor = struct.unpack_from("<HH", data)
+            return ods_major, ods_minor
+    except Exception:
+        return None
+
+
+def _versao_pelo_ods(ods_major: int) -> str:
+    return _ODS_VERSAO_MAP.get(ods_major, f"Firebird desconhecido (ODS {ods_major})")
+
 
 def _derivar_dados_novo(dados_fdb: str) -> str:
-    """Retorna caminho do banco restaurado: mesma pasta, sufixo _NOVO.
-
-    Ex: C:\\Futura\\Dados\\DADOS.fdb  ->  C:\\Futura\\Dados\\DADOS_NOVO.fdb
-    """
     p = Path(dados_fdb)
     return str(p.with_name(p.stem + "_NOVO" + p.suffix))
 
@@ -122,16 +159,16 @@ class _AgendarDialog(QDialog):
 
         lay.addSpacing(4)
 
-        btn_row   = QHBoxLayout()
-        btn_row.setSpacing(8)
-        b_cancel  = make_secondary_btn("CANCELAR",     110)
+        brow = QHBoxLayout()
+        brow.setSpacing(8)
+        b_cancel  = make_secondary_btn("CANCELAR",    110)
         b_confirm = make_primary_btn("CRIAR TAREFA", 130)
         b_cancel.clicked.connect(self.reject)
         b_confirm.clicked.connect(self._criar)
-        btn_row.addStretch()
-        btn_row.addWidget(b_cancel)
-        btn_row.addWidget(b_confirm)
-        lay.addLayout(btn_row)
+        brow.addStretch()
+        brow.addWidget(b_cancel)
+        brow.addWidget(b_confirm)
+        lay.addLayout(brow)
 
         self._upd()
         theme_manager.theme_changed.connect(self._upd)
@@ -167,16 +204,7 @@ class _AgendarDialog(QDialog):
 # ---------------------------------------------------------------------------
 
 class _PathField(QWidget):
-    """Campo de caminho reutilizavel.
-
-    Parametros
-    ----------
-    label_text  : texto do label acima do campo
-    placeholder : texto de dica dentro do campo
-    is_dir      : True  -> abre seletor de PASTA
-                  False -> abre seletor de ARQUIVO (usa file_filter)
-    file_filter : filtro do QFileDialog quando is_dir=False
-    """
+    """Campo de caminho reutilizavel."""
 
     def __init__(
         self,
@@ -233,7 +261,6 @@ class _PathField(QWidget):
 
     def _browse(self):
         current = self._edit.text().strip()
-        # Se vazio ou caminho inexistente, abre em C:\
         if not current or not os.path.exists(current):
             current = "C:\\"
         if self._is_dir:
@@ -257,7 +284,649 @@ class _PathField(QWidget):
 
 
 # ---------------------------------------------------------------------------
-# Step 0 - Configuracao
+# Aba de Configuracao Compartilhada (Firebird + Banco)
+# ---------------------------------------------------------------------------
+
+class _SharedConfigSection(QWidget):
+    """Secao compartilhada: Diretorio Firebird + Arquivo .fdb."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._worker: QThread | None = None
+        self._versao_fdb_detectada: str = ""
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(8)
+
+        self._alert = AlertBox("Detectando instalacao do Firebird...", "info")
+        lay.addWidget(self._alert)
+
+        lay.addWidget(SectionHeader("Configuracao do Firebird"))
+
+        self._fld_firebird = _PathField(
+            "Diretorio do Firebird (onde fica o gbak.exe)",
+            r"Ex: C:\Program Files\Firebird\Firebird_4_0",
+            is_dir=True,
+        )
+        lay.addWidget(self._fld_firebird)
+
+        # Dispara deteccao do Firebird instalado
+        self.iniciar_deteccao()
+
+    # -------------------------------------------------------------------------
+    # Deteccao do Firebird instalado
+    # -------------------------------------------------------------------------
+
+    def iniciar_deteccao(self):
+        self._alert.set_text("Detectando instalacao do Firebird...")
+        self._alert.set_kind("info")
+        self._worker = _DetectarFirebirdWorker()
+        self._worker.finished.connect(
+            self._on_deteccao, Qt.ConnectionType.SingleShotConnection
+        )
+        self._worker.start()
+
+    def _on_deteccao(self, fb_dir: str):
+        if not fb_dir:
+            fb_dir = self._buscar_firebird_fallback()
+        if fb_dir:
+            self._fld_firebird.value = fb_dir
+            self._alert.set_text(f"Firebird encontrado em: {fb_dir}")
+            self._alert.set_kind("success")
+        else:
+            self._alert.set_text(
+                "Nenhuma instalacao do Firebird foi encontrada no computador. "
+                "Informe o caminho manualmente."
+            )
+            self._alert.set_kind("danger")
+
+
+
+    @staticmethod
+    def _buscar_firebird_fallback() -> str:
+        raizes = [
+            r"C:\Program Files\Firebird",
+            r"C:\Program Files (x86)\Firebird",
+            r"C:\Firebird",
+        ]
+        candidatos = []
+        for raiz in raizes:
+            if os.path.isdir(raiz):
+                for gbak in glob.glob(
+                    os.path.join(raiz, "**", "gbak.exe"), recursive=True
+                ):
+                    candidatos.append(os.path.dirname(gbak))
+        if not candidatos:
+            return ""
+        candidatos.sort(reverse=True)
+        return candidatos[0]
+
+    # -------------------------------------------------------------------------
+    # Validacao base
+    # -------------------------------------------------------------------------
+
+    def validar_base(self) -> str | None:
+        """Valida apenas o diretorio do Firebird (comum a backup e restaure)."""
+        if not self._fld_firebird.value:
+            return "Informe o diretorio do Firebird."
+        gbak = os.path.join(self._fld_firebird.value, "gbak.exe")
+        if not os.path.isfile(gbak):
+            return f"gbak.exe nao encontrado em: {self._fld_firebird.value}"
+        return None
+
+    # -------------------------------------------------------------------------
+    # Propriedades publicas
+    # -------------------------------------------------------------------------
+
+    @property
+    def firebird_dir(self) -> str:
+        return self._fld_firebird.value
+
+    def set_alert_text(self, text: str, kind: str = "danger"):
+        self._alert.set_text(text)
+        self._alert.set_kind(kind)
+
+
+# ---------------------------------------------------------------------------
+# Aba de Backup
+# ---------------------------------------------------------------------------
+
+class _TabBackup(QWidget):
+    go_backup = pyqtSignal()
+    finished  = pyqtSignal(bool, dict)
+
+    def __init__(self, shared: _SharedConfigSection, parent=None):
+        super().__init__(parent)
+        self._shared  = shared
+        self._worker: BackupGbakWorker | None = None
+        self._versao_fdb_detectada: str = ""
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 12, 0, 0)
+        lay.setSpacing(8)
+
+        lay.addWidget(SectionHeader("Banco de Dados"))
+
+        self._fld_dados = _PathField(
+            "Arquivo do banco de dados (.fdb)",
+            r"Ex: C:\Futura\Dados\DADOS.fdb",
+            is_dir=False,
+            file_filter="Banco Firebird (*.fdb);;Todos os arquivos (*.*)",
+        )
+        lay.addWidget(self._fld_dados)
+
+        self._alert_versao_fdb = AlertBox("", "info")
+        self._alert_versao_fdb.setVisible(False)
+        lay.addWidget(self._alert_versao_fdb)
+
+        self._fld_dados._edit.textChanged.connect(self._on_fdb_changed)
+
+        lay.addWidget(SectionHeader("Destino do Backup"))
+
+        self._fld_backup_dir = _PathField(
+            "Pasta de destino dos backups (.bck)",
+            r"Ex: C:\Futura\Backup",
+            is_dir=True,
+        )
+        lay.addWidget(self._fld_backup_dir)
+
+        # --- Progresso e log (ocultos ate iniciar) ---
+        self._progress = ProgressBlock("Backup via GBAK")
+        self._progress.setVisible(False)
+        lay.addWidget(self._progress)
+
+        self._console = LogConsole(max_height=0)
+        self._console.setVisible(False)
+        lay.addWidget(self._console, 1)
+
+        lay.addWidget(h_line())
+
+        footer_lay = QHBoxLayout()
+        footer_lay.setContentsMargins(0, 6, 0, 0)
+        footer_lay.setSpacing(10)
+
+        self._btn_backup = make_primary_btn("INICIAR BACKUP", 200)
+        self._btn_backup.clicked.connect(self._on_backup)
+        footer_lay.addWidget(self._btn_backup)
+
+        self._btn_cancel = make_secondary_btn("CANCELAR", 130)
+        self._btn_cancel.clicked.connect(self._cancelar)
+        self._btn_cancel.setVisible(False)
+        footer_lay.addWidget(self._btn_cancel)
+
+        footer_lay.addStretch()
+        lay.addLayout(footer_lay)
+
+        theme_manager.theme_changed.connect(self._upd)
+        self._upd()
+
+
+
+    # -------------------------------------------------------------------------
+    # Deteccao de versao pelo ODS do .fdb
+    # -------------------------------------------------------------------------
+
+    def _on_fdb_changed(self, texto: str):
+        path = texto.strip()
+        if path and os.path.isfile(path) and path.lower().endswith(".fdb"):
+            self._detectar_versao_pelo_fdb(path)
+        else:
+            self._versao_fdb_detectada = ""
+            self._alert_versao_fdb.setVisible(False)
+
+    def _detectar_versao_pelo_fdb(self, path: str):
+        ods = _ler_ods_fdb(path)
+        if ods is None:
+            self._versao_fdb_detectada = ""
+            self._alert_versao_fdb.set_text(
+                "Nao foi possivel ler o cabecalho do arquivo .fdb."
+            )
+            self._alert_versao_fdb.set_kind("warn")
+            self._alert_versao_fdb.setVisible(True)
+            return
+
+        ods_major, ods_minor = ods
+        versao = _versao_pelo_ods(ods_major)
+        self._versao_fdb_detectada = versao
+
+        self._alert_versao_fdb.set_text(
+            f"Banco criado com {versao}  (ODS {ods_major}.{ods_minor})  "
+            f"— o gbak.exe precisa ser da mesma versao."
+        )
+        self._alert_versao_fdb.set_kind("info")
+        self._alert_versao_fdb.setVisible(True)
+        self._sugerir_firebird_para_versao(versao)
+
+    def _sugerir_firebird_para_versao(self, versao: str):
+        hints = _VERSAO_DIR_HINT.get(versao, [])
+        if not hints:
+            return
+        atual = self._shared.firebird_dir
+        if atual and any(h in atual.lower() for h in hints):
+            return
+        raizes = [
+            r"C:\Program Files\Firebird",
+            r"C:\Program Files (x86)\Firebird",
+            r"C:\Firebird",
+        ]
+        candidatos = []
+        for raiz in raizes:
+            if os.path.isdir(raiz):
+                for gbak in glob.glob(
+                    os.path.join(raiz, "**", "gbak.exe"), recursive=True
+                ):
+                    dir_gbak = os.path.dirname(gbak)
+                    if any(h in dir_gbak.lower() for h in hints):
+                        candidatos.append(dir_gbak)
+        if candidatos:
+            candidatos.sort(reverse=True)
+            self._shared._fld_firebird.value = candidatos[0]
+            self._shared.set_alert_text(f"{versao} encontrado em: {candidatos[0]}", "success")
+        else:
+            self._shared.set_alert_text(
+                f"Nenhuma instalacao do {versao} encontrada. "
+                f"Informe o caminho do gbak.exe manualmente.", "danger"
+            )
+
+    # -------------------------------------------------------------------------
+
+    def _upd(self, _mode: str = ""):
+        pass
+
+    def _validar(self) -> str | None:
+        err = self._shared.validar_base()
+        if err:
+            return err
+        if not self._fld_dados.value:
+            return "Informe o arquivo do banco de dados (.fdb)."
+        if not os.path.isfile(self._fld_dados.value):
+            return f"Arquivo .fdb nao encontrado: {self._fld_dados.value}"
+        if not self._fld_backup_dir.value:
+            return "Informe a pasta de destino dos backups."
+        if self._versao_fdb_detectada:
+            hints    = _VERSAO_DIR_HINT.get(self._versao_fdb_detectada, [])
+            fb_lower = self._shared.firebird_dir.lower()
+            if hints and not any(h in fb_lower for h in hints):
+                return (
+                    f"ATENCAO: o banco e {self._versao_fdb_detectada}, mas o "
+                    f"diretorio do gbak informado pode nao ser compativel.\n"
+                    f"Verifique se o gbak.exe e da versao correta antes de continuar."
+                )
+        return None
+
+    def _on_backup(self):
+        err = self._validar()
+        if err:
+            self._shared.set_alert_text(err, "danger")
+            return
+
+        dados_fdb = self._fld_dados.value
+        bck_dest  = gerar_nome_backup(self._fld_backup_dir.value)
+        versao    = self._versao_fdb_detectada
+
+        dlg = ConfirmDialog(
+            "Iniciar Backup do Banco de Dados",
+            [
+                f"Banco de origem:    {dados_fdb}",
+                f"Destino do backup:  {bck_dest}",
+                *(
+                    [f"Versao detectada:   {versao}"]
+                    if versao else []
+                ),
+                "",
+                "O Firebird sera pausado durante o processo.",
+                "O banco sera renomeado temporariamente durante o backup.",
+            ],
+            self,
+        )
+        dlg.exec()
+        if dlg.confirmado():
+            self.go_backup.emit()
+            self._iniciar_worker(dados_fdb, bck_dest)
+
+    def _iniciar_worker(self, dados_fdb: str, bck_dest: str):
+        self._console.clear_console()
+        self._progress.set_progress(0, "Iniciando backup...")
+        self._progress.setVisible(True)
+        self._console.setVisible(True)
+        self._btn_backup.setEnabled(False)
+        self._btn_cancel.setVisible(True)
+        self._btn_cancel.setEnabled(True)
+
+        firebird_dir = self._shared.firebird_dir
+        self._worker = BackupGbakWorker(firebird_dir, dados_fdb, bck_dest)
+        self._worker.log_line.connect(self._console.append_line)
+        self._worker.progress.connect(
+            lambda pct, t, d: self._progress.set_progress(pct, f"{t}  {d}".strip())
+        )
+        self._worker.finished.connect(self._on_worker_finished)
+        self._worker.start()
+
+    def _on_worker_finished(self, sucesso: bool, info: dict):
+        self._btn_backup.setEnabled(True)
+        self._btn_cancel.setVisible(False)
+        self._worker = None
+        self.finished.emit(sucesso, info)
+
+    def _cancelar(self):
+        if self._worker:
+            self._btn_cancel.setEnabled(False)
+            self._worker.stop()
+            self._worker.wait(3000)
+
+    @property
+    def pasta_backup(self) -> str:
+        return self._fld_backup_dir.value
+
+    @property
+    def dados_fdb(self) -> str:
+        return self._fld_dados.value
+
+    @property
+    def dados_novo_fdb(self) -> str:
+        return _derivar_dados_novo(self._fld_dados.value)
+
+    @property
+    def versao_detectada(self) -> str:
+        return self._versao_fdb_detectada
+
+
+# ---------------------------------------------------------------------------
+# Aba de Restaure
+# ---------------------------------------------------------------------------
+
+class _TabRestaure(QWidget):
+    go_restaure = pyqtSignal()
+    finished    = pyqtSignal(bool, dict)
+
+    def __init__(self, shared: _SharedConfigSection, parent=None):
+        super().__init__(parent)
+        self._shared   = shared
+        self._worker: RestaureGbakWorker | None = None
+        self._bck_selecionado: str = ""   # caminho completo do .bck escolhido
+        self._btn_itens: list[QPushButton] = []
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 12, 0, 0)
+        lay.setSpacing(8)
+
+        # --- Pasta de backups ---
+        lay.addWidget(SectionHeader("Pasta de Backups"))
+
+        self._fld_backup_dir = _PathField(
+            "Pasta dos backups (.bck)",
+            r"Ex: C:\Futura\Backup",
+            is_dir=True,
+        )
+        lay.addWidget(self._fld_backup_dir)
+
+        # Ao mudar a pasta, recarrega a lista automaticamente
+        self._fld_backup_dir._edit.textChanged.connect(
+            lambda _: self._carregar_lista()
+        )
+
+        # --- Lista de backups disponiveis ---
+        self._lista_widget = QWidget()
+        self._lista_layout = QVBoxLayout(self._lista_widget)
+        self._lista_layout.setContentsMargins(0, 0, 0, 0)
+        self._lista_layout.setSpacing(3)
+
+        self._scroll_lista = QScrollArea()
+        self._scroll_lista.setWidgetResizable(True)
+        self._scroll_lista.setFrameShape(QScrollArea.Shape.NoFrame)
+        self._scroll_lista.setFixedHeight(180)
+        self._scroll_lista.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self._scroll_lista.setWidget(self._lista_widget)
+        lay.addWidget(self._scroll_lista)
+
+        # --- Banco de dados destino ---
+        lay.addWidget(SectionHeader("Banco de Dados Restaurado"))
+
+        self._fld_dados_novo = _PathField(
+            "Arquivo de destino (.fdb)",
+            r"Ex: C:\Futura\Dados\DADOS_NOVO.fdb",
+            is_dir=False,
+            file_filter="Banco Firebird (*.fdb);;Todos os arquivos (*.*)",
+        )
+        lay.addWidget(self._fld_dados_novo)
+
+        # --- Progresso e log (ocultos ate iniciar) ---
+        self._progress = ProgressBlock("Restaure via GBAK")
+        self._progress.setVisible(False)
+        lay.addWidget(self._progress)
+
+        self._console = LogConsole(max_height=0)
+        self._console.setVisible(False)
+        lay.addWidget(self._console, 1)
+
+        lay.addWidget(h_line())
+
+        footer_lay = QHBoxLayout()
+        footer_lay.setContentsMargins(0, 6, 0, 0)
+        footer_lay.setSpacing(10)
+
+        self._btn_restaure = make_primary_btn("INICIAR RESTAURE", 200)
+        self._btn_restaure.clicked.connect(self._on_restaure)
+        footer_lay.addWidget(self._btn_restaure)
+
+        self._btn_cancel = make_secondary_btn("CANCELAR", 130)
+        self._btn_cancel.clicked.connect(self._cancelar)
+        self._btn_cancel.setVisible(False)
+        footer_lay.addWidget(self._btn_cancel)
+
+        footer_lay.addStretch()
+        lay.addLayout(footer_lay)
+
+        theme_manager.theme_changed.connect(self._upd)
+        self._upd()
+
+        # Carrega lista inicial
+        self._carregar_lista()
+
+    # -------------------------------------------------------------------------
+    # Lista de backups
+    # -------------------------------------------------------------------------
+
+    def _carregar_lista(self):
+        """Varre a pasta e recria os itens da lista."""
+        # Limpa itens anteriores
+        while self._lista_layout.count():
+            item = self._lista_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        self._bck_selecionado = ""
+        self._btn_itens: list[QPushButton] = []
+
+        pasta = self._fld_backup_dir.value
+        if not pasta or not os.path.isdir(pasta):
+            self._scroll_lista.setVisible(False)
+            return
+
+        arquivos = sorted(
+            [
+                os.path.join(pasta, f)
+                for f in os.listdir(pasta)
+                if f.lower().endswith(".bck") and os.path.isfile(os.path.join(pasta, f))
+            ],
+            key=os.path.getmtime,
+            reverse=True,  # mais recente primeiro
+        )
+
+        if not arquivos:
+            self._scroll_lista.setVisible(False)
+            return
+
+        self._label_vazio.setVisible(False)
+        self._scroll_lista.setVisible(True)
+
+        for idx, path in enumerate(arquivos):
+            nome     = os.path.basename(path)
+            tamanho  = _fmt_size(os.path.getsize(path))
+            mtime    = os.path.getmtime(path)
+            from datetime import datetime
+            data_str = datetime.fromtimestamp(mtime).strftime("%d/%m/%Y  %H:%M")
+
+            btn = QPushButton(f"  {nome}    {tamanho}    {data_str}")
+            btn.setCheckable(True)
+            btn.setProperty("bck_path", path)
+            btn.clicked.connect(lambda checked, p=path, b=btn: self._selecionar(p, b))
+            self._btn_itens.append(btn)
+            self._lista_layout.addWidget(btn)
+
+            # Seleciona automaticamente o mais recente
+            if idx == 0:
+                self._selecionar(path, btn)
+
+        self._lista_layout.addStretch()
+        self._upd()
+
+    def _selecionar(self, path: str, btn_clicado: QPushButton):
+        """Marca o item selecionado e desmarca os outros."""
+        self._bck_selecionado = path
+        for b in self._btn_itens:
+            b.setChecked(b is btn_clicado)
+        self._upd_itens()
+
+
+    def _upd_itens(self):
+        for b in self._btn_itens:
+            if b.isChecked():
+                b.setStyleSheet(f"""
+                    QPushButton {{
+                        background: {COLORS['accent']};
+                        color: #ffffff;
+                        border: 1.5px solid {COLORS['accent']};
+                        border-radius: 6px;
+                        padding: 6px 12px;
+                        font-size: 11px;
+                        text-align: left;
+                    }}
+                """)
+            else:
+                b.setStyleSheet(f"""
+                    QPushButton {{
+                        background: {COLORS['surface']};
+                        color: {COLORS['text']};
+                        border: 1px solid {COLORS['border']};
+                        border-radius: 6px;
+                        padding: 6px 12px;
+                        font-size: 11px;
+                        text-align: left;
+                    }}
+                    QPushButton:hover {{
+                        background: {COLORS['border']};
+                    }}
+                """)
+
+    # -------------------------------------------------------------------------
+
+    def _upd(self, _mode: str = ""):
+        self._scroll_lista.setStyleSheet(f"""
+            QScrollArea {{ background: transparent; border: none; }}
+            QScrollBar:vertical {{
+                background: {COLORS['surface']};
+                width: 6px; border-radius: 3px;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {COLORS['border']};
+                border-radius: 3px;
+            }}
+        """)
+        self._upd_itens()
+
+    def _validar(self) -> str | None:
+        err = self._shared.validar_base()
+        if err:
+            return err
+        if not self._bck_selecionado:
+            return "Selecione um arquivo de backup para restaurar."
+        if not os.path.isfile(self._bck_selecionado):
+            return f"Arquivo de backup nao encontrado: {self._bck_selecionado}"
+        if not self._fld_dados_novo.value:
+            return "Informe o arquivo de destino do banco restaurado (.fdb)."
+        return None
+
+    def _on_restaure(self):
+        err = self._validar()
+        if err:
+            self._shared.set_alert_text(err, "danger")
+            return
+
+        dados_novo = self._fld_dados_novo.value
+        nome_bck   = os.path.basename(self._bck_selecionado)
+
+        dlg = ConfirmDialog(
+            "Iniciar Restaure do Banco de Dados",
+            [
+                f"Arquivo de backup:  {nome_bck}",
+                f"Banco restaurado:   {dados_novo}",
+                "",
+                "O banco original NAO sera alterado.",
+            ],
+            self,
+        )
+        dlg.exec()
+        if dlg.confirmado():
+            self.go_restaure.emit()
+            self._iniciar_worker(self._bck_selecionado, dados_novo)
+
+    def _iniciar_worker(self, bck_file: str, dados_novo: str):
+        self._console.clear_console()
+        self._progress.set_progress(0, "Iniciando restaure...")
+        self._progress.setVisible(True)
+        self._console.setVisible(True)
+        self._btn_restaure.setEnabled(False)
+        self._btn_cancel.setVisible(True)
+        self._btn_cancel.setEnabled(True)
+
+        firebird_dir = self._shared.firebird_dir
+
+        if self._worker is not None:
+            try:
+                self._worker.finished.disconnect(self._on_worker_finished)
+            except RuntimeError:
+                pass
+            self._worker = None
+
+        self._worker = RestaureGbakWorker(firebird_dir, bck_file, dados_novo)
+        self._worker.log_line.connect(self._console.append_line)
+        self._worker.progress.connect(
+            lambda pct, t, d: self._progress.set_progress(pct, f"{t}  {d}".strip())
+        )
+        self._worker.finished.connect(self._on_worker_finished)
+        self._worker.start()
+
+    def _on_worker_finished(self, sucesso: bool, info: dict):
+        self._btn_restaure.setEnabled(True)
+        self._btn_cancel.setVisible(False)
+        self._worker = None
+        self.finished.emit(sucesso, info)
+
+    def _cancelar(self):
+        if self._worker:
+            self._btn_cancel.setEnabled(False)
+            self._worker.stop()
+            self._worker.wait(3000)
+
+    @property
+    def pasta_backup(self) -> str:
+        return self._fld_backup_dir.value
+
+    @property
+    def bck_especifico(self) -> str:
+        return self._bck_selecionado
+
+    @property
+    def dados_novo_fdb(self) -> str:
+        return self._fld_dados_novo.value
+
+
+# ---------------------------------------------------------------------------
+# Step 0 - Configuracao com abas Backup | Restaure
 # ---------------------------------------------------------------------------
 
 class _StepConfig(QWidget):
@@ -266,7 +935,6 @@ class _StepConfig(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._worker: QThread | None = None
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -282,322 +950,93 @@ class _StepConfig(QWidget):
         lay.setContentsMargins(0, 0, 16, 0)
         lay.setSpacing(8)
 
-        self._alert = AlertBox("Detectando instalacao do Firebird...", "info")
-        lay.addWidget(self._alert)
-
-        lay.addWidget(SectionHeader("Caminhos"))
-
-        self._fld_firebird = _PathField(
-            "Diretorio do Firebird (onde fica o gbak.exe)",
-            r"Ex: C:\Program Files\Firebird\Firebird_4_0",
-            is_dir=True,
-        )
-        lay.addWidget(self._fld_firebird)
-
-        self._fld_dados = _PathField(
-            "Arquivo do banco de dados (.fdb)",
-            r"Ex: C:\Futura\Dados\DADOS.fdb",
-            is_dir=False,
-            file_filter="Banco Firebird (*.fdb);;Todos os arquivos (*.*)",
-        )
-        self._fld_dados.value = os.path.join(_DEFAULT_PASTA_DADOS, "DADOS.fdb")
-        lay.addWidget(self._fld_dados)
-
-        self._fld_backup_dir = _PathField(
-            "Pasta de destino dos backups (.bck)",
-            r"Ex: C:\Futura\Backup",
-            is_dir=True,
-        )
-        self._fld_backup_dir.value = _DEFAULT_PASTA_BACKUP
-        lay.addWidget(self._fld_backup_dir)
-
-        # Informativo dinamico: onde o banco restaurado sera salvo
-        self._info_restaure = label(
-            self._texto_info_restaure(), COLORS["text_mid"], 11
-        )
-        self._info_restaure.setWordWrap(True)
-        lay.addWidget(self._info_restaure)
-        self._fld_dados._edit.textChanged.connect(self._atualizar_info_restaure)
+        # Secao compartilhada (Firebird + .fdb) — aparece acima das abas
+        self._shared = _SharedConfigSection()
+        lay.addWidget(self._shared)
 
         lay.addWidget(h_line())
-        lay.addWidget(SectionHeader("Arquivo de backup para Restaure"))
 
-        self._alert_bck = AlertBox(
-            "Deixe em branco para usar o backup mais recente da pasta acima.",
-            "info",
-        )
-        lay.addWidget(self._alert_bck)
-
-        self._fld_bck_file = _PathField(
-            "Arquivo .bck (opcional - selecione apenas para restaure especifico)",
-            r"Ex: C:\Futura\Backup\BACKUP_2025-01-15_14-30.bck",
-            is_dir=False,
-            file_filter="Backup Firebird (*.bck);;Todos os arquivos (*.*)",
-        )
-        lay.addWidget(self._fld_bck_file)
-
-        self._info_lbl = label("", COLORS["text_mid"], 11)
-        self._info_lbl.setWordWrap(True)
-        lay.addWidget(self._info_lbl)
+        # Abas: Backup | Restaure
+        self._tabs = QTabWidget()
+        self._tab_backup   = _TabBackup(self._shared)
+        self._tab_restaure = _TabRestaure(self._shared)
+        self._tabs.addTab(self._tab_backup,   "  Backup  ")
+        self._tabs.addTab(self._tab_restaure, "  Restaure  ")
+        lay.addWidget(self._tabs)
 
         lay.addStretch()
         scroll.setWidget(inner)
         root.addWidget(scroll, 1)
 
-        footer   = QWidget()
-        foot_lay = QVBoxLayout(footer)
-        foot_lay.setContentsMargins(0, 8, 0, 0)
-        foot_lay.setSpacing(6)
+        # Conexoes das abas para os sinais da pagina
+        self._tab_backup.go_backup.connect(self.go_backup)
+        self._tab_restaure.go_restaure.connect(self.go_restaure)
 
-        self._btn_backup   = make_primary_btn("INICIAR BACKUP",    200)
-        self._btn_restaure = make_secondary_btn("INICIAR RESTAURE", 200)
-        self._btn_backup.clicked.connect(self._on_backup)
-        self._btn_restaure.clicked.connect(self._on_restaure)
+        theme_manager.theme_changed.connect(self._upd_tabs)
+        self._upd_tabs()
 
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(10)
-        btn_row.addWidget(self._btn_backup)
-        btn_row.addWidget(self._btn_restaure)
-        btn_row.addStretch()
+    def _upd_tabs(self, _mode: str = ""):
+        self._tabs.setStyleSheet(f"""
+            QTabWidget::pane {{
+                border: 1px solid {COLORS['border']};
+                border-radius: 0 6px 6px 6px;
+                background: transparent;
+            }}
+            QTabBar::tab {{
+                background: {COLORS['surface']};
+                color: {COLORS['text_mid']};
+                border: 1px solid {COLORS['border']};
+                border-bottom: none;
+                padding: 6px 20px;
+                font-size: 12px;
+                font-weight: 600;
+                margin-right: 2px;
+                border-radius: 6px 6px 0 0;
+            }}
+            QTabBar::tab:selected {{
+                background: {COLORS['accent']};
+                color: #ffffff;
+                border-color: {COLORS['accent']};
+            }}
+            QTabBar::tab:hover:!selected {{
+                background: {COLORS['border']};
+                color: {COLORS['text']};
+            }}
+        """)
 
-        foot_lay.addWidget(h_line())
-        foot_lay.addLayout(btn_row)
-        root.addWidget(footer, 0)
-
-        theme_manager.theme_changed.connect(self._upd)
-        self._upd()
-
-    def _texto_info_restaure(self) -> str:
-        dados = self._fld_dados.value if hasattr(self, "_fld_dados") else ""
-        if dados:
-            return f"Banco restaurado sera salvo em: {_derivar_dados_novo(dados)}"
-        return "Banco restaurado sera salvo na mesma pasta do .fdb selecionado (sufixo _NOVO)."
-
-    def _atualizar_info_restaure(self):
-        self._info_restaure.setText(self._texto_info_restaure())
-
-    def _upd(self, _mode: str = ""):
-        self._info_lbl.setStyleSheet(f"color: {COLORS['text_mid']}; font-size: 11px;")
-        self._info_restaure.setStyleSheet(f"color: {COLORS['text_mid']}; font-size: 11px;")
-
-    def iniciar_deteccao(self):
-        self._alert.set_text("Detectando instalacao do Firebird...")
-        self._alert.set_kind("info")
-        self._worker = _DetectarFirebirdWorker()
-        self._worker.finished.connect(
-            self._on_deteccao, Qt.ConnectionType.SingleShotConnection
-        )
-        self._worker.start()
-
-    def _on_deteccao(self, fb_dir: str):
-        if fb_dir:
-            self._fld_firebird.value = fb_dir
-            self._alert.set_text(f"Firebird encontrado em: {fb_dir}")
-            self._alert.set_kind("success")
-        else:
-            self._alert.set_text(
-                "Firebird nao detectado automaticamente. Informe o caminho manualmente."
-            )
-            self._alert.set_kind("warn")
-
-    def _validar(self) -> str | None:
-        if not self._fld_firebird.value:
-            return "Informe o diretorio do Firebird."
-        gbak = os.path.join(self._fld_firebird.value, "gbak.exe")
-        if not os.path.isfile(gbak):
-            return f"gbak.exe nao encontrado em: {self._fld_firebird.value}"
-        if not self._fld_dados.value:
-            return "Informe o arquivo do banco de dados (.fdb)."
-        if not os.path.isfile(self._fld_dados.value):
-            return f"Arquivo .fdb nao encontrado: {self._fld_dados.value}"
-        if not self._fld_backup_dir.value:
-            return "Informe a pasta de destino dos backups."
-        return None
-
-    def _on_backup(self):
-        err = self._validar()
-        if err:
-            self._alert.set_text(err)
-            self._alert.set_kind("danger")
-            return
-
-        dados_fdb = self._fld_dados.value
-        bck_dest  = gerar_nome_backup(self._fld_backup_dir.value)
-
-        dlg = ConfirmDialog(
-            "Iniciar Backup do Banco de Dados",
-            [
-                f"Banco de origem:    {dados_fdb}",
-                f"Destino do backup:  {bck_dest}",
-                "",
-                "O Firebird sera pausado durante o processo.",
-                "O banco sera renomeado temporariamente durante o backup.",
-            ],
-            self,
-        )
-        dlg.exec()
-        if dlg.confirmado():
-            self.go_backup.emit()
-
-    def _on_restaure(self):
-        err = self._validar()
-        if err:
-            self._alert.set_text(err)
-            self._alert.set_kind("danger")
-            return
-
-        bck        = self._fld_bck_file.value or "(mais recente da pasta)"
-        dados_novo = _derivar_dados_novo(self._fld_dados.value)
-
-        dlg = ConfirmDialog(
-            "Iniciar Restaure do Banco de Dados",
-            [
-                f"Arquivo de backup:  {bck}",
-                f"Banco gerado:       {dados_novo}",
-                "",
-                "O banco original NAO sera alterado.",
-                "O arquivo _NOVO.fdb sera gerado para revisao.",
-            ],
-            self,
-        )
-        dlg.exec()
-        if dlg.confirmado():
-            self.go_restaure.emit()
-
-    # --- Propriedades publicas ---
+    # --- Propriedades publicas (compatibilidade com PageBackupGbak) ---
 
     @property
     def firebird_dir(self) -> str:
-        return self._fld_firebird.value
+        return self._shared.firebird_dir
 
     @property
     def dados_fdb(self) -> str:
-        return self._fld_dados.value
+        return self._tab_backup.dados_fdb
 
     @property
     def dados_novo_fdb(self) -> str:
-        """Caminho derivado automaticamente: mesma pasta do .fdb, sufixo _NOVO."""
-        return _derivar_dados_novo(self._fld_dados.value)
+        idx = self._tabs.currentIndex()
+        if idx == 1:
+            return self._tab_restaure.dados_novo_fdb
+        return self._tab_backup.dados_novo_fdb
 
     @property
     def pasta_backup(self) -> str:
-        return self._fld_backup_dir.value
+        idx = self._tabs.currentIndex()
+        if idx == 0:
+            return self._tab_backup.pasta_backup
+        return self._tab_restaure.pasta_backup
 
     @property
     def bck_especifico(self) -> str:
-        return self._fld_bck_file.value
+        return self._tab_restaure.bck_especifico
 
+    def set_aba_restaure(self):
+        self._tabs.setCurrentIndex(1)
 
-# ---------------------------------------------------------------------------
-# Step 1A - Execucao do Backup
-# ---------------------------------------------------------------------------
-
-class _StepBackup(QWidget):
-    finished = pyqtSignal(bool, dict)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._worker: BackupGbakWorker | None = None
-
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(10)
-
-        self._progress = ProgressBlock("Backup via GBAK")
-        lay.addWidget(self._progress)
-
-        self._console = LogConsole(max_height=0)
-        lay.addWidget(self._console, 1)
-
-        footer  = QWidget()
-        f_lay   = QHBoxLayout(footer)
-        f_lay.setContentsMargins(0, 8, 0, 0)
-        self._btn_cancel = make_secondary_btn("CANCELAR", 140)
-        self._btn_cancel.clicked.connect(self._cancelar)
-        f_lay.addStretch()
-        f_lay.addWidget(self._btn_cancel)
-
-        lay.addWidget(h_line())
-        lay.addWidget(footer, 0)
-
-    def iniciar(self, firebird_dir: str, dados_fdb: str, backup_bck: str):
-        self._console.clear_console()
-        self._progress.set_progress(0, "Iniciando backup...")
-        self._btn_cancel.setEnabled(True)
-
-        self._worker = BackupGbakWorker(firebird_dir, dados_fdb, backup_bck)
-        self._worker.log_line.connect(self._console.append_line)
-        self._worker.progress.connect(
-            lambda pct, t, d: self._progress.set_progress(pct, f"{t}  {d}".strip())
-        )
-        self._worker.finished.connect(self.finished)
-        self._worker.start()
-
-    def _cancelar(self):
-        if self._worker:
-            self._btn_cancel.setEnabled(False)
-            self._worker.stop()
-            self._worker.wait(3000)
-
-
-# ---------------------------------------------------------------------------
-# Step 1B - Execucao do Restaure
-# ---------------------------------------------------------------------------
-
-class _StepRestaure(QWidget):
-    finished = pyqtSignal(bool, dict)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._worker: RestaureGbakWorker | None = None
-
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(10)
-
-        self._progress = ProgressBlock("Restaure via GBAK")
-        lay.addWidget(self._progress)
-
-        self._console = LogConsole(max_height=0)
-        lay.addWidget(self._console, 1)
-
-        footer  = QWidget()
-        f_lay   = QHBoxLayout(footer)
-        f_lay.setContentsMargins(0, 8, 0, 0)
-        self._btn_cancel = make_secondary_btn("CANCELAR", 140)
-        self._btn_cancel.clicked.connect(self._cancelar)
-        f_lay.addStretch()
-        f_lay.addWidget(self._btn_cancel)
-
-        lay.addWidget(h_line())
-        lay.addWidget(footer, 0)
-
-    def iniciar(self, firebird_dir: str, backup_bck: str, dados_novo: str):
-        self._console.clear_console()
-        self._progress.set_progress(0, "Iniciando restaure...")
-        self._btn_cancel.setEnabled(True)
-
-        # Desconecta worker anterior para evitar disparo duplo do signal finished
-        if self._worker is not None:
-            try:
-                self._worker.finished.disconnect(self.finished)
-            except RuntimeError:
-                pass
-            self._worker = None
-
-        self._worker = RestaureGbakWorker(firebird_dir, backup_bck, dados_novo)
-        self._worker.log_line.connect(self._console.append_line)
-        self._worker.progress.connect(
-            lambda pct, t, d: self._progress.set_progress(pct, f"{t}  {d}".strip())
-        )
-        self._worker.finished.connect(self.finished)
-        self._worker.start()
-
-    def _cancelar(self):
-        if self._worker:
-            self._btn_cancel.setEnabled(False)
-            self._worker.stop()
-            self._worker.wait(3000)
+    def set_aba_backup(self):
+        self._tabs.setCurrentIndex(0)
 
 
 # ---------------------------------------------------------------------------
@@ -606,7 +1045,7 @@ class _StepRestaure(QWidget):
 
 class _StepResultado(QWidget):
     go_menu          = pyqtSignal()
-    iniciar_restaure = pyqtSignal(str)   # emite o caminho do .bck gerado
+    iniciar_restaure = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -626,11 +1065,9 @@ class _StepResultado(QWidget):
         lay.addStretch()
         lay.addWidget(h_line())
 
-        # Menu Principal: sempre visivel
         self._btn_menu = make_secondary_btn("MENU PRINCIPAL", 160)
         self._btn_menu.clicked.connect(self.go_menu.emit)
 
-        # Iniciar RESTAURE: visivel apenas apos backup bem-sucedido
         self._btn_restaure = make_primary_btn("INICIAR RESTAURE", 200)
         self._btn_restaure.clicked.connect(self._on_iniciar_restaure)
         self._btn_restaure.setVisible(False)
@@ -662,7 +1099,6 @@ class _StepResultado(QWidget):
         lay.removeWidget(self._result_box)
         self._result_box.deleteLater()
 
-        # Botao "Iniciar RESTAURE" visivel apenas apos BACKUP bem-sucedido
         mostrar_restaure = (operacao == "Backup" and sucesso)
         self._btn_restaure.setVisible(mostrar_restaure)
         self._ultimo_bck = info.get("backup_path", "") if mostrar_restaure else ""
@@ -707,15 +1143,11 @@ class _StepResultado(QWidget):
 class PageBackupGbak(QWidget):
     go_menu = pyqtSignal()
 
-    _IDX_CONFIG   = 0
-    _IDX_BACKUP   = 1
-    _IDX_RESTAURE = 2
-    _IDX_RESULT   = 3
+    _IDX_CONFIG = 0
+    _IDX_RESULT = 1
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._worker: QThread | None = None
-        self._operacao_atual = ""
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -725,7 +1157,6 @@ class PageBackupGbak(QWidget):
         self._header.back_clicked.connect(self.go_menu.emit)
         root.addWidget(self._header)
 
-        # Container para o conteúdo original
         content_w = QWidget()
         content_lay = QVBoxLayout(content_w)
         content_lay.setContentsMargins(40, 20, 40, 20)
@@ -734,32 +1165,22 @@ class PageBackupGbak(QWidget):
         self._stack = QStackedWidget()
 
         self._cfg       = _StepConfig()
-        self._bk        = _StepBackup()
-        self._rst       = _StepRestaure()
         self._resultado = _StepResultado()
 
         self._stack.addWidget(self._cfg)        # idx 0
-        self._stack.addWidget(self._bk)         # idx 1
-        self._stack.addWidget(self._rst)        # idx 2
-        self._stack.addWidget(self._resultado)  # idx 3
+        self._stack.addWidget(self._resultado)  # idx 1
 
         content_lay.addWidget(self._stack)
         root.addWidget(content_w, 1)
 
         # Conexoes
-        self._cfg.go_backup.connect(self._iniciar_backup)
-        self._cfg.go_restaure.connect(self._iniciar_restaure)
-        self._bk.finished.connect(self._on_backup_finished)
-        self._rst.finished.connect(self._on_restaure_finished)
-        self._resultado.go_menu.connect(self.go_menu)
-        self._resultado.iniciar_restaure.connect(self._iniciar_restaure_com_bck)
+        self._cfg._tab_backup.finished.connect(self._on_backup_finished)
+        self._cfg._tab_restaure.finished.connect(self._on_restaure_finished)
+        self._resultado.go_menu.connect(self._on_go_menu)
+        self._resultado.iniciar_restaure.connect(self._on_iniciar_restaure_do_resultado)
 
     def reset(self):
-        self._go_step(self._IDX_CONFIG)
-        self._cfg.iniciar_deteccao()
-
-    def _go_step(self, idx: int):
-        self._stack.setCurrentIndex(idx)
+        self._stack.setCurrentIndex(self._IDX_CONFIG)
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:
@@ -768,75 +1189,19 @@ class PageBackupGbak(QWidget):
         else:
             super().keyPressEvent(event)
 
-    def _iniciar_backup(self):
-        firebird_dir = self._cfg.firebird_dir
-        pasta_backup = self._cfg.pasta_backup
-        dados_fdb    = self._cfg.dados_fdb
-
-        backup_bck = gerar_nome_backup(pasta_backup)
-        self._operacao_atual = "Backup"
-        self._go_step(self._IDX_BACKUP)
-        self._bk.iniciar(firebird_dir, dados_fdb, backup_bck)
-        self._worker = self._bk._worker
-
-    def _iniciar_restaure(self):
-        """Restaure iniciado pelo botao da tela de configuracao."""
-        firebird_dir = self._cfg.firebird_dir
-        pasta_backup = self._cfg.pasta_backup
-
-        bck_file = self._cfg.bck_especifico
-        if not bck_file:
-            bck_file = self._ultimo_backup(pasta_backup)
-
-        if not bck_file:
-            log.warn("[BackupGBAK] Nenhum arquivo .bck encontrado para restaure.")
-            self._cfg._alert.set_text(
-                "Nenhum arquivo .bck encontrado. Selecione o arquivo manualmente."
-            )
-            self._cfg._alert.set_kind("danger")
-            return
-
-        dados_novo = self._cfg.dados_novo_fdb
-        self._operacao_atual = "Restaure"
-        self._go_step(self._IDX_RESTAURE)
-        self._rst.iniciar(firebird_dir, bck_file, dados_novo)
-        self._worker = self._rst._worker
-
-    def _iniciar_restaure_com_bck(self, bck_path: str):
-        """Restaure iniciado pelo botao 'Iniciar RESTAURE' da tela de resultado do backup."""
-        firebird_dir = self._cfg.firebird_dir
-        dados_novo   = self._cfg.dados_novo_fdb
-
-        if not bck_path or not os.path.isfile(bck_path):
-            self._resultado._alert.set_text(
-                "Arquivo de backup nao encontrado para restaure."
-            )
-            self._resultado._alert.set_kind("danger")
-            return
-
-        self._operacao_atual = "Restaure"
-        self._go_step(self._IDX_RESTAURE)
-        self._rst.iniciar(firebird_dir, bck_path, dados_novo)
-        self._worker = self._rst._worker
-
     def _on_backup_finished(self, sucesso: bool, info: dict):
-        self._worker = None
         self._resultado.set_resultado("Backup", sucesso, info)
-        self._go_step(self._IDX_RESULT)
+        self._stack.setCurrentIndex(self._IDX_RESULT)
 
     def _on_restaure_finished(self, sucesso: bool, info: dict):
-        self._worker = None
         self._resultado.set_resultado("Restaure", sucesso, info)
-        self._go_step(self._IDX_RESULT)
+        self._stack.setCurrentIndex(self._IDX_RESULT)
 
-    @staticmethod
-    def _ultimo_backup(pasta: str) -> str | None:
-        """Retorna o .bck mais recente da pasta, ou None se nao houver."""
-        if not os.path.isdir(pasta):
-            return None
-        bcks = sorted(
-            [os.path.join(pasta, f) for f in os.listdir(pasta) if f.endswith(".bck")],
-            key=os.path.getmtime,
-            reverse=True,
-        )
-        return bcks[0] if bcks else None
+    def _on_go_menu(self):
+        self._stack.setCurrentIndex(self._IDX_CONFIG)
+        self.go_menu.emit()
+
+    def _on_iniciar_restaure_do_resultado(self, bck_path: str):
+        """Botao 'Iniciar Restaure' na tela de resultado: volta para config na aba restaure."""
+        self._cfg.set_aba_restaure()
+        self._stack.setCurrentIndex(self._IDX_CONFIG)

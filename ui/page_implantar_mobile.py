@@ -45,12 +45,6 @@ _DEFAULT_PASSWORD = "sbofutura"
 
 
 # ---------------------------------------------------------------------------
-# Helpers de botao
-# ---------------------------------------------------------------------------
-
-
-
-# ---------------------------------------------------------------------------
 # Campo .fdb com botao explorer
 # ---------------------------------------------------------------------------
 
@@ -97,7 +91,6 @@ class _PathFieldDB(QWidget):
             }}
             QLineEdit:focus {{ border-color: {COLORS['accent']}; }}
         """)
-
 
     def _browse(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -479,7 +472,7 @@ class _StepFormulario(QWidget):
 # ---------------------------------------------------------------------------
 
 class _StepResultado(QWidget):
-    go_menu     = pyqtSignal()
+    go_menu          = pyqtSignal()
     nova_implantacao = pyqtSignal()
 
     def __init__(self, parent=None):
@@ -506,6 +499,8 @@ class _StepResultado(QWidget):
 
         self._root_lay.addWidget(h_line())
 
+        # ✅ CORRIGIDO: botão criado antes de ser usado
+        self._btn_nova = make_secondary_btn("NOVA IMPLANTAÇÃO", 180)
         self._btn_nova.clicked.connect(self.nova_implantacao.emit)
 
         self._root_lay.addWidget(btn_row(self._btn_nova))

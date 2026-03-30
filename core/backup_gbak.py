@@ -210,6 +210,7 @@ class _DetectarFirebirdWorker(QThread):
     """Detecta diretorio do Firebird em background.
 
     Signal 'finished' emite apenas o diretorio (str), vazio se nao encontrado.
+    O try/except garante que o signal SEMPRE e emitido, mesmo em caso de erro.
     """
     finished = pyqtSignal(str)
 
@@ -217,8 +218,13 @@ class _DetectarFirebirdWorker(QThread):
         super().__init__()
 
     def run(self):
-        fb = find_firebird_dir() or ""
-        self.finished.emit(fb)
+        try:
+            fb = find_firebird_dir() or ""
+        except Exception as e:
+            log.warn(f"[DetectarFirebird] Erro durante deteccao: {e}")
+            fb = ""
+        finally:
+            self.finished.emit(fb)
 
 
 # ---------------------------------------------------------------------------

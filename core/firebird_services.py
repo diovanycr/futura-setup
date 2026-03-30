@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+import os
+import glob
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -57,6 +59,15 @@ FIREBIRD_PATHS: list[str] = [
     r"C:\Program Files (x86)\Firebird\Firebird_3_0",
     r"C:\Program Files\Firebird\Firebird_2_5",
     r"C:\Program Files (x86)\Firebird\Firebird_2_5",
+]
+
+# Raízes para busca recursiva quando os caminhos fixos não encontrarem
+_FIREBIRD_SEARCH_ROOTS: list[str] = [
+    r"C:\Program Files\Firebird",
+    r"C:\Program Files (x86)\Firebird",
+    r"C:\Firebird",
+    r"C:\Program Files\Firebird Database",
+    r"C:\Program Files (x86)\Firebird Database",
 ]
 
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW
@@ -109,13 +120,47 @@ def start_firebird_services(servicos: list[str]) -> None:
 def find_firebird_dir() -> Optional[str]:
     """
     Retorna o diretório do Firebird instalado (onde gbak.exe está), ou None.
-    Verifica primeiro pela presença do gbak.exe, depois só pelo diretório.
+
+    Estratégia em três etapas:
+      1. Verifica caminhos fixos conhecidos (gbak.exe presente)
+      2. Verifica caminhos fixos conhecidos (só pelo diretório)
+      3. Busca recursiva nas raízes comuns procurando gbak.exe
+         (cobre instalações em pastas com nomes não padronizados)
+
+    Todos os acessos ao filesystem são protegidos por try/except para
+    garantir que a função sempre retorna (nunca trava).
     """
+    # Etapa 1: caminho fixo com gbak.exe
     for path in FIREBIRD_PATHS:
-        if Path(path, "gbak.exe").is_file():
-            return path
+        try:
+            if Path(path, "gbak.exe").is_file():
+                return path
+        except Exception:
+            continue
+
+    # Etapa 2: caminho fixo pelo diretório (sem gbak)
     for conf in FIREBIRD_CONF_PATHS:
-        parent = Path(conf).parent
-        if parent.exists():
-            return str(parent)
+        try:
+            parent = Path(conf).parent
+            if parent.exists():
+                return str(parent)
+        except Exception:
+            continue
+
+    # Etapa 3: busca recursiva nas raízes comuns
+    candidatos: list[str] = []
+    for raiz in _FIREBIRD_SEARCH_ROOTS:
+        try:
+            if os.path.isdir(raiz):
+                for gbak in glob.glob(
+                    os.path.join(raiz, "**", "gbak.exe"), recursive=True
+                ):
+                    candidatos.append(os.path.dirname(gbak))
+        except Exception:
+            continue
+
+    if candidatos:
+        candidatos.sort(reverse=True)
+        return candidatos[0]
+
     return None
