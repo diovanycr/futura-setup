@@ -1420,6 +1420,26 @@ class PageInstalarFirebird(QWidget):
 
         lay.addWidget(self._res_alert)
         lay.addWidget(self._res_detalhe)
+
+        # ── Botões de navegação pós-instalação ────────────────────────────
+        self._btn_ir_banco   = make_secondary_btn("IR PARA BANCO DE DADOS", 200)
+        self._btn_ir_servico = make_secondary_btn("IR PARA SERVICO", 180)
+        self._btn_novo       = make_secondary_btn("NOVA INSTALACAO", 180)
+
+        self._btn_ir_banco.setVisible(False)
+        self._btn_ir_servico.setVisible(False)
+
+        self._btn_ir_banco.clicked.connect(self._ir_para_banco)
+        self._btn_ir_servico.clicked.connect(self._ir_para_servico)
+        self._btn_novo.clicked.connect(self._go_novo)
+
+        foot = QHBoxLayout()
+        foot.addWidget(self._btn_ir_banco)
+        foot.addWidget(self._btn_ir_servico)
+        foot.addStretch()
+        foot.addWidget(self._btn_novo)
+        lay.addLayout(foot)
+
         lay.addStretch()
         return w
 
@@ -1709,7 +1729,7 @@ class PageInstalarFirebird(QWidget):
             if self._stack.currentIndex() != self._IDX_CONFIG:
                 self._go_step(self._IDX_CONFIG)
                 return
-        
+
         self.go_menu.emit()
 
     def _ir_para_banco(self):
