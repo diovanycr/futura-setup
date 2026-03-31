@@ -1233,6 +1233,7 @@ class PageInstalarFirebird(QWidget):
         self._status_worker: QThread | None = None
         self._checker: QThread | None = None
         self._arch          = detect_arch()
+        self._tabs_built = {0: True, 1: False, 2: False}
         self._versao_sel    = "4"
         self._version_cards : dict[str, _VersionCard] = {}
         self._svc_cards     : dict[str, _ServicoCard] = {}
@@ -1259,95 +1260,61 @@ class PageInstalarFirebird(QWidget):
         else:
             self._banner = None
 
-        # QTabWidget
+        # QTabWidget com Lazy Loading
         self._tabs = QTabWidget()
         self._tabs.setFont(QFont(FONT_SANS, 10))
+        self._tabs.currentChanged.connect(self._on_tab_changed)
         root.addWidget(self._tabs, 1)
 
-        # ── Aba 0 — Instalacao ────────────────────────────────────────────
-        tab_install = QWidget()
-        tlay = QVBoxLayout(tab_install)
-        tlay.setContentsMargins(0, 12, 0, 0)
-        tlay.setSpacing(0)
-
+        # Aba 0: Instalação (Construção inicial)
+        self._tab_install = QWidget()
+        ilay = QVBoxLayout(self._tab_install); ilay.setContentsMargins(0, 12, 0, 0); ilay.setSpacing(0)
         self._stack = QStackedWidget()
         self._stack.addWidget(self._build_config())
         self._stack.addWidget(self._build_running())
         self._stack.addWidget(self._build_resultado())
-        tlay.addWidget(self._stack, 1)
+        ilay.addWidget(self._stack, 1)
+        self._tabs.addTab(self._tab_install, "Instalacao")
 
-        self._tabs.addTab(tab_install, "Instalacao")
-
-        # ── Aba 1 — Servico ───────────────────────────────────────────────
-        tab_svc = QWidget()
-        slay = QVBoxLayout(tab_svc)
-        slay.setContentsMargins(16, 16, 16, 16)
-        slay.setSpacing(10)
-
-        nota_svc = label(
-            "Gerencie o servico do Firebird instalado. "
-            "Iniciar uma versao para automaticamente a outra.",
-            COLORS["text_mid"], 10,
-        )
-        nota_svc.setWordWrap(True)
-        slay.addWidget(nota_svc)
-
-        # Alerta de operação de serviço
-        self._svc_alert = AlertBox("", "info")
-        self._svc_alert.setVisible(False)
-        slay.addWidget(self._svc_alert)
-
-        # Cards FB3 e FB4 lado a lado
-        svc_cards_lay = QHBoxLayout()
-        svc_cards_lay.setSpacing(16)
-
-        for v in ("3", "4"):
-            card = _ServicoCard(v)
-            card.acao_solicitada.connect(self._on_svc_acao)
-            self._svc_cards[v] = card
-            svc_cards_lay.addWidget(card, 1)
-
-        slay.addLayout(svc_cards_lay)
-
-        # Log de operações de serviço
-        slay.addWidget(label("Log de operacoes:", COLORS["text_dim"], 8))
-        self._svc_console = LogConsole(max_height=120)
-        slay.addWidget(self._svc_console)
-
-        slay.addStretch()
-        self._tabs.addTab(tab_svc, "Servico")
-
-        # ── Aba 2 — Banco de Dados ────────────────────────────────────────
-        tab_db = QWidget()
-        dlay = QVBoxLayout(tab_db)
-        dlay.setContentsMargins(16, 16, 16, 16)
-        dlay.setSpacing(8)
-
-        nota_db = label(
-            "Configure quais bancos de dados o Firebird ira expor. "
-            "Varre o HD, selecione o arquivo Dados e clique em Configurar.",
-            COLORS["text_dim"], 9,
-        )
-        nota_db.setWordWrap(True)
-        dlay.addWidget(nota_db)
-
-        self._db_conf_card = _DatabasesConfCard()
-        dlay.addWidget(self._db_conf_card)
-        dlay.addStretch()
-
-        self._tabs.addTab(tab_db, "Banco de Dados")
+        # Placeholders
+        self._tab_svc = QWidget()
+        self._tab_db  = QWidget()
+        self._tabs.addTab(self._tab_svc, "Servico")
+        self._tabs.addTab(self._tab_db, "Banco de Dados")
 
         theme_manager.theme_changed.connect(self._upd_tabs_style)
         self._upd_tabs_style()
 
         self._go_step(self._IDX_CONFIG)
-        self._run_install_check()
-
-        # Timer para atualização periódica do status dos serviços
         self._timer_svc = QTimer(self)
         self._timer_svc.setInterval(5000)
         self._timer_svc.timeout.connect(self._atualizar_status_servicos)
-        self._timer_svc.start()
+
+        # NÃO iniciamos workers nem verificações aqui. Deixamos para o showEvent.
+
+    def _on_tab_changed(self, index):
+        if self._tabs_built.get(index): return
+        if index == 1: self._build_tab_svc()
+        elif index == 2: self._build_tab_db()
+        self._tabs_built[index] = True
+        self._upd_tabs_style()
+
+    def _build_tab_svc(self):
+        slay = QVBoxLayout(self._tab_svc); slay.setContentsMargins(16, 16, 16, 16); slay.setSpacing(10)
+        nota_svc = label("Gerencie o servico do Firebird instalado. Iniciar uma versao para automaticamente a outra.", COLORS["text_mid"], 10); nota_svc.setWordWrap(True); slay.addWidget(nota_svc)
+        self._svc_alert = AlertBox("", "info"); self._svc_alert.setVisible(False); slay.addWidget(self._svc_alert)
+        svc_cards_lay = QHBoxLayout(); svc_cards_lay.setSpacing(16)
+        for v in ("3", "4"):
+            card = _ServicoCard(v); card.acao_solicitada.connect(self._on_svc_acao)
+            self._svc_cards[v] = card; svc_cards_lay.addWidget(card, 1)
+        slay.addLayout(svc_cards_lay)
+        slay.addWidget(label("Log de operacoes:", COLORS["text_dim"], 8))
+        self._svc_console = LogConsole(max_height=120); slay.addWidget(self._svc_console); slay.addStretch()
+
+    def _build_tab_db(self):
+        dlay = QVBoxLayout(self._tab_db); dlay.setContentsMargins(16, 16, 16, 16); dlay.setSpacing(8)
+        nota_db = label("Configure quais bancos de dados o Firebird ira expor. Varre o HD, selecione o arquivo Dados e clique em Configurar.", COLORS["text_dim"], 9); nota_db.setWordWrap(True); dlay.addWidget(nota_db)
+        self._db_conf_card = _DatabasesConfCard(); dlay.addWidget(self._db_conf_card); dlay.addStretch()
 
     # =========================================================================
     # Build das telas
@@ -1461,14 +1428,7 @@ class PageInstalarFirebird(QWidget):
         self._checker.start()
 
     def _on_check_done(self, result):
-        # Atualiza badge INSTALADO/NÃO INSTALADO de cada _VersionCard
-        for v in ("3", "4"):
-            pasta = _encontrar_pasta_firebird(v)
-            card  = self._version_cards.get(v)
-            if card:
-                card.set_installed(bool(pasta))
-
-        # Atualiza status dos serviços logo após check inicial
+        """Resultado do check inicial. Agora delegamos a atualização visual ao _atualizar_status_servicos."""
         self._atualizar_status_servicos()
 
     # =========================================================================
@@ -1741,12 +1701,17 @@ class PageInstalarFirebird(QWidget):
         self._atualizar_status_servicos()
 
     def showEvent(self, event):
-        self._timer_svc.start()
-        self._atualizar_status_servicos()
         super().showEvent(event)
+        # Delay para garantir fluidez na navegação
+        QTimer.singleShot(150, self._run_install_check)
+        QTimer.singleShot(300, self._timer_svc.start)
 
     def hideEvent(self, event):
         self._timer_svc.stop()
+        # Encerramento seguro de todas as threads ativas
+        for w in (self._worker, self._svc_worker, self._status_worker, self._checker):
+            if w and w.isRunning():
+                w.wait(200)
         super().hideEvent(event)
 
     # =========================================================================

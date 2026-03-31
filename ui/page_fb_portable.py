@@ -1780,6 +1780,7 @@ class PageFbPortable(QWidget):
         self._toggle_rows  : dict[str, _ToggleRow]  = {}
         self._modo_cards   : dict[str, _ModoCard]   = {}
         self._versao_auto_install: str = "4"
+        self._tabs_built = {0: True, 1: False, 2: False, 3: False, 4: False, 5: False}
 
         self._last_st: dict | None = None
         self._eh_admin: bool | None = None
@@ -1795,8 +1796,6 @@ class PageFbPortable(QWidget):
         self._timer = QTimer(self)
         self._timer.setInterval(4000)
         self._timer.timeout.connect(self._atualizar_status)
-
-        self._verificar_admin_background()
 
     # =========================================================================
     # Verificação assíncrona de admin
@@ -1859,203 +1858,121 @@ class PageFbPortable(QWidget):
         _upd_title()
 
         self._banner_admin = None
-
+        
+        # Componentes globais que precisam existir desde o início
+        self._alert    = AlertBox("", "info")
+        self._progress = QProgressBar()
+        self._console  = _Console(fixed_height=0)
+        self._ir_cards : dict[str, _InstallRemoveCard] = {}
+        self._auto_cards : dict[str, _AutoInstallCard] = {}
+        self._toggle_rows : dict[str, _ToggleRow] = {}
+        self._modo_cards : dict[str, _ModoCard] = {}
+        
         self._tabs = QTabWidget()
         self._tabs.setFont(QFont(FONT_SANS, 10))
+        self._tabs.currentChanged.connect(self._on_tab_changed)
         self._content_lay.addWidget(self._tabs)
 
-        # -- ABA: Controle de versões --------------------------------------
-        tab_controle = QWidget()
-        tlay_root = QVBoxLayout(tab_controle)
-        tlay_root.setContentsMargins(16, 16, 16, 16)
-        tlay_root.setSpacing(10)
+        # -- ABA 0: Instalação Automática (Carregada no Início) -----------
+        self._tab_auto = QWidget()
+        self._build_tab_auto()
+        self._tabs.addTab(self._tab_auto, "⚡ Instalação Automática")
 
-        info = label(
-            "Ative/inative cada versão e configure o modo de execução. "
-            "Ativar uma versão desativa automaticamente a outra. "
-            "Ambas usam a porta 3050.",
-            COLORS["text_mid"], 10,
-        )
-        info.setWordWrap(True)
-        tlay_root.addWidget(info)
+        # -- Placeholders para as outras abas (Lazy Loading) -------------
+        self._tab_controle = QWidget()
+        self._tab_instalar = QWidget()
+        self._tab_db       = QWidget()
+        self._tab_fb4      = QWidget()
+        self._tab_log      = QWidget()
 
-        self._dashboard = _StatusDashboard()
-        self._dashboard.versao_clicada.connect(self._on_dash_v_clicada)
-        self._dashboard.acao_solicitada.connect(self._on_dash_acao)
-        tlay_root.addWidget(self._dashboard)
-
-        tf = QFrame()
-        tf.setObjectName("toggles_frame")
-        tlay_cols = QHBoxLayout(tf)
-        tlay_cols.setContentsMargins(16, 16, 16, 16)
-        tlay_cols.setSpacing(16)
-
-        for versao in ("3", "4"):
-            cfg     = FB_CONFIGS[versao]
-            detalhe = f"Processo portable - porta {cfg['porta']}"
-
-            col_frame = QFrame()
-            col_frame.setMinimumWidth(320)
-            col_lay = QVBoxLayout(col_frame)
-            col_lay.setContentsMargins(0, 0, 0, 0)
-            col_lay.setSpacing(10)
-
-            row = _ToggleRow(versao, detalhe)
-            row.toggle.toggled.connect(
-                lambda checked, v=versao: self._on_toggle(v, checked)
-            )
-            self._toggle_rows[versao] = row
-            col_lay.addWidget(row)
-
-            card = _ModoCard(versao)
-            card.acao_solicitada.connect(self._on_servico_acao)
-            self._modo_cards[versao] = card
-            col_lay.addWidget(card)
-            col_lay.addStretch()
-
-            tlay_cols.addWidget(col_frame, 1)
-
-        tlay_root.addWidget(tf)
-        tlay_root.addStretch()
-
-        # -- ABA: Instalação Automática ------------------------------------
-        tab_auto = QWidget()
-        alay = QVBoxLayout(tab_auto)
-        alay.setContentsMargins(16, 16, 16, 16)
-        alay.setSpacing(10)
-
-        desc_auto = label(
-            "Utilize este assistente para instalar e configurar o Firebird de forma totalmente automatizada.",
-            COLORS["text_mid"], 10
-        )
-        desc_auto.setWordWrap(True)
-        alay.addWidget(desc_auto)
-
-        card_lay = QHBoxLayout()
-        card_lay.setSpacing(16)
-
-        self._auto_cards = {}
-        for v in ("3", "4"):
-            card = _AutoInstallCard(v)
-            card.acao_solicitada.connect(self._on_auto_install)
-            self._auto_cards[v] = card
-            card_lay.addWidget(card, 1)
-
-        alay.addLayout(card_lay)
-        alay.addStretch()
-
-        self._tabs.addTab(tab_auto, "⚡ Instalação Automática")
-        self._tabs.addTab(tab_controle, "⚙️ Controle de Versões")
-
-        # -- ABA: Instalar / Remover ---------------------------------------
-        tab_instalar = QWidget()
-        ilay = QVBoxLayout(tab_instalar)
-        ilay.setContentsMargins(16, 16, 16, 16)
-        ilay.setSpacing(10)
-
-        nota = label(
-            "Instale ou remova cada versão do Firebird Portable de forma independente.",
-            COLORS["text_dim"], 9,
-        )
-        nota.setWordWrap(True)
-        ilay.addWidget(nota)
-
-        ir_card_lay = QHBoxLayout()
-        ir_card_lay.setSpacing(16)
-
-        self._ir_cards: dict[str, _InstallRemoveCard] = {}
-        for v in ("3", "4"):
-            ir_card = _InstallRemoveCard(v)
-            ir_card.instalar_solicitado.connect(self._on_instalar)
-            ir_card.remover_solicitado.connect(self._on_remover)
-            self._ir_cards[v] = ir_card
-            ir_card_lay.addWidget(ir_card, 1)
-
-        ilay.addLayout(ir_card_lay)
-
-        self._progress = QProgressBar()
-        self._progress.setRange(0, 100)
-        self._progress.setValue(0)
-        self._progress.setFixedHeight(8)
-        self._progress.setTextVisible(False)
-        self._progress.setVisible(False)
-        ilay.addWidget(self._progress)
-
-        self._alert = AlertBox("", "info")
-        self._alert.setVisible(False)
-        ilay.addWidget(self._alert)
-
-        ilay.addStretch()
-
-        self._tabs.addTab(tab_instalar, "📦 Instalar / Remover")
-
-        # -- ABA: Banco de Dados -------------------------------------------
-        tab_db = QWidget()
-        self._tab_db = tab_db
-        dlay = QVBoxLayout(tab_db)
-        dlay.setContentsMargins(16, 16, 16, 16)
-        dlay.setSpacing(8)
-
-        nota_db = label(
-            "Configure quais bancos de dados o Firebird Portable irá expor. "
-            "Varre o HD, selecione o arquivo Dados e clique em Aplicar.",
-            COLORS["text_dim"], 9,
-        )
-        nota_db.setWordWrap(True)
-        dlay.addWidget(nota_db)
-
-        self._db_conf_card = _DatabasesConfCard()
-        dlay.addWidget(self._db_conf_card)
-        dlay.addStretch()
-
-        self._tabs.addTab(tab_db, "🗄️ Banco de Dados")
-
-        # -- ABA: Configurações Oficiais FB4 --------------------------------
-        tab_fb4 = QWidget()
-        flay = QVBoxLayout(tab_fb4)
-        flay.setContentsMargins(16, 16, 16, 16)
-        flay.setSpacing(8)
-
-        nota_fb4 = label(
-            "Utilize esta ferramenta para restaurar os arquivos de configuração padrão do Firebird 4.",
-            COLORS["text_dim"], 9,
-        )
-        nota_fb4.setWordWrap(True)
-        flay.addWidget(nota_fb4)
-
-        self._fb4_conf_card = _Fb4ConfigCard()
-        flay.addWidget(self._fb4_conf_card)
-        flay.addStretch()
-
-        self._tabs.addTab(tab_fb4, "🔧 Configurações FB4")
-
-        # -- ABA: Logs ------------------------------------------------------
-        tab_log = QWidget()
-        llay = QVBoxLayout(tab_log)
-        llay.setContentsMargins(0, 8, 0, 0)
-        llay.setSpacing(6)
-
-        lbl_log = label(
-            "Registro de todas as operações realizadas nesta sessão.",
-            COLORS["text_dim"], 9,
-        )
-        lbl_log.setWordWrap(True)
-        llay.addWidget(lbl_log)
-
-        self._console = _Console(fixed_height=0)
-        llay.addWidget(self._console, 1)
-
-        btn_limpar = make_secondary_btn("Limpar Log", 130)
-        btn_limpar.clicked.connect(self._console.limpar)
-        llay.addWidget(btn_limpar)
-
-        self._tabs.addTab(tab_log, "📋 Logs")
+        self._tabs.addTab(self._tab_controle, "⚙️ Controle de Versões")
+        self._tabs.addTab(self._tab_instalar, "📦 Instalar / Remover")
+        self._tabs.addTab(self._tab_db,       "🗄️ Banco de Dados")
+        self._tabs.addTab(self._tab_fb4,      "🔧 Configurações FB4")
+        self._tabs.addTab(self._tab_log,      "📋 Logs")
 
         self._content_lay.addStretch()
         root.addWidget(content_w)
 
         self._upd_style()
-        self._on_versao_changed("4")
+
+    def _on_tab_changed(self, index):
+        if self._tabs_built.get(index):
+            return
+        
+        if index == 1: self._build_tab_controle()
+        elif index == 2: self._build_tab_instalar()
+        elif index == 3: self._build_tab_db()
+        elif index == 4: self._build_tab_fb4()
+        elif index == 5: self._build_tab_log()
+        
+        self._tabs_built[index] = True
+        self._upd_style()
+
+    def _build_tab_auto(self):
+        alay = QVBoxLayout(self._tab_auto)
+        alay.setContentsMargins(16, 16, 16, 16)
+        alay.setSpacing(10)
+        desc_auto = label("Assistente para instalar e configurar o Firebird de forma automatizada.", COLORS["text_mid"], 10)
+        desc_auto.setWordWrap(True)
+        alay.addWidget(desc_auto)
+        card_lay = QHBoxLayout(); card_lay.setSpacing(16)
+        self._auto_cards = {}
+        for v in ("3", "4"):
+            card = _AutoInstallCard(v)
+            card.acao_solicitada.connect(self._on_auto_install)
+            card.sig_set_loading.connect(card.set_loading)
+            self._auto_cards[v] = card
+            card_lay.addWidget(card, 1)
+        alay.addLayout(card_lay); alay.addStretch()
+
+    def _build_tab_controle(self):
+        tlay_root = QVBoxLayout(self._tab_controle)
+        tlay_root.setContentsMargins(16, 16, 16, 16)
+        tlay_root.setSpacing(10)
+        info = label("Ative/inative cada versão e configure o modo de execução. ", COLORS["text_mid"], 10)
+        info.setWordWrap(True); tlay_root.addWidget(info)
+        self._dashboard = _StatusDashboard()
+        self._dashboard.versao_clicada.connect(self._on_dash_v_clicada)
+        self._dashboard.acao_solicitada.connect(self._on_dash_acao)
+        tlay_root.addWidget(self._dashboard)
+        tf = QFrame(); tf.setObjectName("toggles_frame")
+        tlay_cols = QHBoxLayout(tf); tlay_cols.setContentsMargins(16, 16, 16, 16); tlay_cols.setSpacing(16)
+        for versao in ("3", "4"):
+            cfg = FB_CONFIGS[versao]; det = f"Porta {cfg['porta']}"
+            col_frame = QFrame(); col_lay = QVBoxLayout(col_frame); col_lay.setContentsMargins(0,0,0,0); col_lay.setSpacing(10)
+            row = _ToggleRow(versao, det)
+            row.toggle.toggled.connect(lambda checked, v=versao: self._on_toggle(v, checked))
+            self._toggle_rows[versao] = row
+            col_lay.addWidget(row)
+            card = _ModoCard(versao); card.acao_solicitada.connect(self._on_servico_acao)
+            self._modo_cards[versao] = card
+            col_lay.addWidget(card); col_lay.addStretch(); tlay_cols.addWidget(col_frame, 1)
+        tlay_root.addWidget(tf); tlay_root.addStretch()
+
+    def _build_tab_instalar(self):
+        ilay = QVBoxLayout(self._tab_instalar)
+        ilay.setContentsMargins(16, 16, 16, 16); ilay.setSpacing(10)
+        ir_card_lay = QHBoxLayout(); ir_card_lay.setSpacing(16)
+        for v in ("3", "4"):
+            ir_card = _InstallRemoveCard(v); ir_card.instalar_solicitado.connect(self._on_instalar); ir_card.remover_solicitado.connect(self._on_remover); ir_card.sig_set_loading.connect(ir_card.set_loading)
+            self._ir_cards[v] = ir_card; ir_card_lay.addWidget(ir_card, 1)
+        ilay.addLayout(ir_card_lay)
+        ilay.addWidget(self._progress); ilay.addWidget(self._alert); ilay.addStretch()
+
+    def _build_tab_db(self):
+        dlay = QVBoxLayout(self._tab_db); dlay.setContentsMargins(16,16,16,16)
+        self._tab_db = self._tab_db # No-op to satisfy reference
+        self._db_conf_card = _DatabasesConfCard(); dlay.addWidget(self._db_conf_card); dlay.addStretch()
+
+    def _build_tab_fb4(self):
+        flay = QVBoxLayout(self._tab_fb4); flay.setContentsMargins(16,16,16,16)
+        self._fb4_conf_card = _Fb4ConfigCard(); flay.addWidget(self._fb4_conf_card); flay.addStretch()
+
+    def _build_tab_log(self):
+        llay = QVBoxLayout(self._tab_log); llay.setContentsMargins(0, 8, 0, 0)
+        llay.addWidget(self._console, 1)
+        btn_limpar = make_secondary_btn("Limpar Log", 130); btn_limpar.clicked.connect(self._console.limpar); llay.addWidget(btn_limpar)
 
     # =========================================================================
     # Toggles — alternância automática
@@ -2260,7 +2177,11 @@ class PageFbPortable(QWidget):
                     d       = st[f"fb{versao}"]
                     inst    = d["instalado"]
                     rodando = d["rodando"]
+                    
+                    if versao not in self._toggle_rows: continue
                     row     = self._toggle_rows[versao]
+                    
+                    if versao not in self._modo_cards: continue
                     card    = self._modo_cards[versao]
 
                     porta = FB_CONFIGS[versao]['porta']
@@ -2302,7 +2223,8 @@ class PageFbPortable(QWidget):
             self._upd_toggle = False
 
         try:
-            self._dashboard.atualizar(st)
+            if hasattr(self, "_dashboard") and self._dashboard:
+                self._dashboard.atualizar(st)
         except Exception:
             pass
 
@@ -2637,8 +2559,13 @@ class PageFbPortable(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
-        self._verificar_admin_background()
+        # Delay de 100ms para garantir que a página já apareceu na tela e o menu não trave
+        QTimer.singleShot(100, self._verificar_admin_background)
 
     def hideEvent(self, event):
         self._timer.stop()
+        for attr in ("_worker", "_admin_check_worker", "_status_worker"):
+            w = getattr(self, attr, None)
+            if w and w.isRunning():
+                w.wait(200)
         super().hideEvent(event)
