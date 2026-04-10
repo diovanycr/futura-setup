@@ -4,7 +4,7 @@
 
 import html
 from PyQt6.QtWidgets import QWidget, QTextEdit, QStackedWidget, QSizePolicy, QVBoxLayout
-from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, pyqtSignal, QTimer, pyqtProperty
 from PyQt6.QtGui import QFont, QPainter, QColor, QBrush, QPen
 
 from ui.theme import COLORS, FONT_MONO, FONT_SANS
