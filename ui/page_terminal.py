@@ -58,6 +58,8 @@ class PageTerminal(QWidget):
         self._file_items: list[MiniFileItem] = []
         self._worker: InstalacaoWorker | None = None
         self._processos: list[dict]           = []
+        self._server_info_banner = AlertBox("", "info")
+        self._server_info_banner.setVisible(False)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -81,6 +83,9 @@ class PageTerminal(QWidget):
 
         self._stack = FadeStackedWidget()
         self._stack.setStyleSheet("background: transparent;")
+        
+        content_lay.addWidget(self._server_info_banner)
+        content_lay.addWidget(spacer(h=8))
         content_lay.addWidget(self._stack)
         root.addWidget(content_w, 1)
 
@@ -95,6 +100,13 @@ class PageTerminal(QWidget):
 
     def set_servidor(self, srv: Servidor):
         self._servidor = srv
+        if srv:
+            self._server_info_banner.set_text(
+                f"Servidor: <b>{srv.hostname}</b> — IP: {srv.ip} — {srv.path}"
+            )
+            self._server_info_banner.setVisible(True)
+        else:
+            self._server_info_banner.setVisible(False)
         self._go_step(0)
 
     # ── STEP 1: Pasta de Instalação ───────────────────────────────────────────
@@ -372,8 +384,8 @@ class PageTerminal(QWidget):
         self._files_container.setStyleSheet("background: transparent;")
         self._files_grid = QGridLayout(self._files_container)
         self._files_grid.setContentsMargins(0, 0, 4, 0)
-        self._files_grid.setHorizontalSpacing(10)
-        self._files_grid.setVerticalSpacing(8)
+        self._files_grid.setHorizontalSpacing(12)
+        self._files_grid.setVerticalSpacing(10)
         scroll.setWidget(self._files_container)
         
         lay.addWidget(scroll)

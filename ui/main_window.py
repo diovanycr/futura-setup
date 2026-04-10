@@ -4,6 +4,7 @@
 
 from PyQt6.QtWidgets import QMainWindow, QWidget, QHBoxLayout
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QShortcut, QKeySequence
 
 from ui.theme import COLORS, get_stylesheet
 from ui.theme_manager import theme_manager
@@ -47,6 +48,7 @@ class MainWindow(QMainWindow):
 
         # ── Conexão de Eventos ──────────────────────────────────────────────
         self._setup_connections()
+        self._setup_shortcuts()
         
         # ── Estado Inicial ───────────────────────────────────────────────────
         self._close_guard = False
@@ -71,6 +73,11 @@ class MainWindow(QMainWindow):
         # Conexões Dinâmicas (Signals das páginas)
         # O NavigationManager emite um sinal toda vez que uma página muda/é criada
         self._nav.page_changed.connect(self._on_page_ready)
+
+    def _setup_shortcuts(self):
+        """Configura atalhos globais do sistema."""
+        self._sc_search = QShortcut(QKeySequence("Ctrl+K"), self)
+        self._sc_search.activated.connect(self._sidebar.search_bar.setFocus)
 
     def _on_page_ready(self, idx, page):
         """Conecta sinais específicos de cada página quando elas são instanciadas."""

@@ -3,7 +3,7 @@
 # =============================================================================
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QLineEdit
 )
 from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QPoint, pyqtSignal
 from PyQt6.QtGui import QFont
@@ -319,7 +319,15 @@ class Sidebar(QWidget):
 
         self._div_top = self._make_divider()
         inner_lay.addWidget(self._div_top)
-        inner_lay.addWidget(spacer(h=4))
+        inner_lay.addWidget(spacer(h=8))
+
+        # -- Search Bar --
+        self.search_bar = QLineEdit()
+        self.search_bar.setPlaceholderText("Busca rápida (Ctrl+K)")
+        self.search_bar.setObjectName("search_bar")
+        self.search_bar.setFixedHeight(32)
+        inner_lay.addWidget(self.search_bar)
+        inner_lay.addWidget(spacer(h=8))
 
         # -- Navegação principal --
         self.nav_menu        = NavItem("Menu Principal",   ">")
@@ -374,6 +382,17 @@ class Sidebar(QWidget):
         self.setStyleSheet(f"""
             QWidget#Sidebar {{ background: {COLORS['surface2']}; }}
             QWidget#active_bar {{ background: {COLORS['accent']}; border-radius: 2px; }}
+            QLineEdit#search_bar {{
+                background: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 6px;
+                padding: 4px 10px;
+                color: {COLORS['text_mid']};
+                font-size: 11px;
+            }}
+            QLineEdit#search_bar:focus {{
+                border-color: {COLORS['accent']};
+            }}
         """)
         self._inner.setStyleSheet(f"background: {COLORS['surface2']};")
         self._border.setStyleSheet(f"background: {COLORS['border']}; border: none;")

@@ -63,6 +63,10 @@ LIGHT_COLORS = {
     # -- Misc ------------------------------------------------------------------
     "white":        "#1C1C1C",
     "btn_border":   "#C2C2C2",   # borda de botão secundário
+
+    # -- Gradients -----------------------------------------------------------
+    "grad_accent":  "qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #0078D4, stop:1 #0067C0)",
+    "grad_surface": "qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #FFFFFF, stop:1 #F9F9F9)",
 }
 
 DARK_COLORS = {
@@ -111,6 +115,10 @@ DARK_COLORS = {
     # -- Misc -----------------------------------------------------------------
     "white":        "#F0F0F0",
     "btn_border":   "#404040",   # borda de botão secundário bem visível
+
+    # -- Gradients -----------------------------------------------------------
+    "grad_accent":  "qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #60CDFF, stop:1 #4CC2FF)",
+    "grad_surface": "qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #2C2C2C, stop:1 #1E1E1E)",
 }
 
 COLORS = dict(LIGHT_COLORS)
@@ -130,7 +138,7 @@ def get_stylesheet(mode: str = "light") -> str:
 QWidget {{
     background-color: {C['bg']};
     color: {C['text']};
-    font-family: 'Segoe UI';
+    font-family: 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif;
     font-size: 13px;
     border: none;
     outline: none;

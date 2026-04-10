@@ -526,20 +526,38 @@ class InstalacaoWorker(_BaseWorker):
         for tentativa in range(1, max_tentativas + 1):
             prefixo = nome if tentativa == 1 else f"{nome} (tentativa {tentativa})"
             self.progress.emit(progresso_base, prefixo, f"Copiando {tam_fmt}...")
+            
+            temp_dest = Path(destino).with_suffix(f"{Path(destino).suffix}.tmp")
+            
             try:
-                if tentativa > 1 and Path(destino).exists():
-                    Path(destino).unlink()
+                if temp_dest.exists():
+                    temp_dest.unlink()
 
-                shutil.copy2(origem, destino)
+                # Cópia para arquivo temporário
+                shutil.copy2(origem, str(temp_dest))
 
                 integro, motivo = _verificar_integridade(
-                    destino, hash_origem, tam_origem
+                    str(temp_dest), hash_origem, tam_origem
                 )
+                
                 if not integro:
                     self._log(f"{motivo} em {nome}", "warn")
+                    temp_dest.unlink(missing_ok=True)
                     if tentativa < max_tentativas:
                         continue
                     return False
+
+                # Troca atômica (ou o mais próximo disso no Windows via rename)
+                if Path(destino).exists():
+                    try:
+                        Path(destino).unlink()
+                    except Exception as e:
+                        # Se não conseguir apagar (arquivo em uso?), tenta renomear o destino atual
+                        old_bk = Path(destino).with_suffix(".old")
+                        old_bk.unlink(missing_ok=True)
+                        os.rename(destino, str(old_bk))
+                
+                os.rename(str(temp_dest), destino)
 
                 self.progress.emit(progresso_max, prefixo, f"Concluído ({tam_fmt})")
                 self._log(f"{nome} copiado ({tam_fmt})", "ok")
@@ -547,6 +565,7 @@ class InstalacaoWorker(_BaseWorker):
 
             except Exception as e:
                 self._log(f"Falha ao copiar {nome} (tent. {tentativa}): {e}", "err")
+                temp_dest.unlink(missing_ok=True)
                 if tentativa == max_tentativas:
                     log.error(f"Falha definitiva ao copiar {nome}: {e}")
 

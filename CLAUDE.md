@@ -1,4 +1,4 @@
-# CLAUDE.md — Futura Setup v4.3.0
+# CLAUDE.md — Futura Setup v5.0
 
 ## O que é este projeto
 
@@ -22,21 +22,25 @@ futura_setup/
 │   ├── trocar_senha.py        # Troca a senha de acesso e atualiza main.py
 │   └── trocar_senha.bat       # Duplo clique para trocar senha sem abrir CMD
 ├── ui/
-│   ├── theme.py               # Paleta de cores (light/dark), COLORS global, get_stylesheet()
+│   ├── components/            # Fragmentação de ui/widgets.py
+│   │   ├── base.py            # Utilitários, labels, spacers, linhas
+│   │   ├── buttons.py         # Fábricas de botões (primary, secondary)
+│   │   ├── cards.py           # Itens selecionáveis (ServerItem, RadioRow, etc.)
+│   │   ├── containers.py      # LogConsole, FadeStackedWidget, Overlays
+│   │   ├── dialogs.py         # ConfirmDialog, WorkerGuardDialog
+│   │   └── feedback.py        # AlertBox, Header, Progress, StepIndicator
+│   ├── theme.py               # Paleta de cores (light/dark), COLORS global
 │   ├── theme_manager.py       # Singleton ThemeManager, sinal theme_changed
-│   ├── widgets.py             # Componentes reutilizáveis (ver seção abaixo)
-│   ├── page_menu.py           # Menu principal (5 cards em lista)
-│   ├── page_scan.py           # Escaneamento de rede para encontrar servidor Futura
-│   ├── page_atalhos.py        # Modo 01: cria atalhos apontando para o servidor
-│   ├── page_terminal.py       # Modo 02: copia arquivos localmente
-│   ├── page_atualizacao.py    # Modo 03: atualização completa do sistema
-│   ├── page_restaurar.py      # Modo 04: restaura backups anteriores
-│   └── page_log.py            # Visualiza log de execuções com filtros
+│   ├── widgets.py             # Facade que exporta componentes de ui/components/
+│   ├── page_menu.py           # Menu principal
+│   ├── page_scan.py           # Escaneamento de rede
+│   └── ...                    # Outras páginas
 └── core/
-    ├── logger.py              # Singleton FuturaLogger + Prefs → %APPDATA%\Futura\
-    ├── network.py             # Descoberta de servidores via ARP + share test
-    ├── installer.py           # Workers: instalação terminal, restauração, atalhos
-    └── atualizador.py         # Worker: atualização completa do ERP Futura
+    ├── app_state.py           # NEW: Singleton Global Reativo (AppState)
+    ├── logger.py              # Singleton FuturaLogger + Prefs
+    ├── network.py             # Descoberta de servidores
+    ├── installer.py           # Workers de instalação
+    └── atualizador.py         # Worker de atualização completa do ERP
 ```
 
 ---
@@ -254,24 +258,26 @@ Esses workers usam `Qt.ConnectionType.SingleShotConnection` para evitar chamadas
 
 ---
 
-## Widgets reutilizáveis (ui/widgets.py)
+## Arquitetura de Componentes (ui/components/)
 
-| Widget | Uso |
+O arquivo `ui/widgets.py` agora serve apenas como uma **facade** para manter retrocompatibilidade. Os componentes estão divididos logicamente:
+
+| Arquivo | Componentes principais |
 |---|---|
-| `PageTitle(tag, title)` | Cabeçalho de página com tag em accent e título |
-| `SectionHeader(text)` | Subtítulo de seção |
-| `AlertBox(text, kind)` | Caixa de alerta — `kind ∈ {"info","warn","danger","success"}` |
-| `LogConsole(max_height, max_lines)` | Console de log com cores por kind; `max_height=0` = sem limite |
-| `ProgressBlock(label)` | Barra de progresso + texto de status |
-| `StepIndicator(names)` | Indicador de etapas horizontal |
-| `ResultBox(title, rows, kind)` | Caixa de resultado com tabela de campos |
-| `MiniFileItem(name, size_str)` | Item de arquivo com checkbox — toggle por clique |
-| `DestPanel()` | Painel de seleção de destino (Desktop / Menu Iniciar / Ambos) |
-| `ServerItem(hostname, ip, path, version)` | Card de servidor selecionável — emite `selected(self)` |
-| `BackupItem(info)` | Card de backup selecionável — emite `selected(self)` (em page_restaurar.py) |
-| `RadioRow(text, desc, checked)` | Card com radio button — usado nas páginas de seleção |
-| `WorkerGuardDialog(parent)` | Diálogo de confirmação ao fechar com worker ativo |
-| `MenuCard(number, title, desc, accent)` | Card legado — mantido para compatibilidade |
+| `base.py` | `hex_to_rgb`, `card_style`, `spacer`, `h_line`, `HLine`, `label` |
+| `buttons.py` | `make_primary_btn`, `make_secondary_btn`, `make_folder_btn`, `btn_row` |
+| `feedback.py` | `PageHeader`, `SectionHeader`, `AlertBox`, `ProgressBlock`, `StepIndicator`, `LoadingSpinner` |
+| `containers.py` | `LogConsole`, `FadeStackedWidget`, `BusyOverlay` |
+| `cards.py` | `ServerItem`, `RadioRow`, `MiniFileItem`, `DestPanel`, `ProcessCard`, `MenuCard` |
+| `dialogs.py` | `ConfirmDialog`, `WorkerGuardDialog` |
+
+### Reactive App State (core/app_state.py)
+O singleton `state` centraliza dados globais sem acoplamento direto entre classes:
+- `state.servidor` (Servidor selecionado)
+- `state.servidor_changed` (Signal)
+- `state.pasta` (Caminho de destino)
+- `state.flow_mode` (atalhos, terminal, etc.)
+- `state.is_worker_running` (Signal Worker running)
 
 ### Helpers de layout
 ```python

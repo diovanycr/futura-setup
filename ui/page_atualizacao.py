@@ -7,11 +7,17 @@
 #   - keyPressEvent: Escape volta ao passo anterior
 # Melhorias v5:
 #   - Botões substituídos por _make_primary_btn/_make_secondary_btn (padrão visual correto)
+# Melhorias v6:
+#   - Botão "Explorar" no Step 1: abre QFileDialog para selecionar pasta manualmente
+# Melhorias v7:
+#   - Step 2: detecção de .fdb agora busca recursivamente em todo C:\
+#   - Step 2: botão Explorar sempre abre em C:\
 # =============================================================================
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
     QLabel, QButtonGroup, QScrollArea, QPushButton, QRadioButton,
+    QFileDialog,
 )
 from PyQt6.QtCore import pyqtSignal, Qt, QThread
 from PyQt6.QtGui import QFont
@@ -33,7 +39,7 @@ STEP_NAMES = ["Instalação", "Banco", "Resumo", "Executando", "Concluído"]
 
 
 
-# ── CARD DE PASTA ─────────────────────────────────────────────────────────────
+# -- CARD DE PASTA -------------------------------------------------------------
 
 class _PastaCard(QWidget):
     """Card visual melhorado para exibir cada pasta detectada."""
@@ -168,7 +174,8 @@ class _DetectarBancosWorker(QThread):
         self._pasta = pasta
 
     def run(self):
-        self.finished.emit(find_bancos(self._pasta))
+        # Busca recursivamente em todo C:\ independentemente da pasta de instalação
+        self.finished.emit(find_bancos("C:\\"))
 
 
 # -- PAGE ATUALIZACAO ----------------------------------------------------------
@@ -251,7 +258,7 @@ class PageAtualizacao(QWidget):
 
         lay.addWidget(SectionHeader("Instalação do Futura"))
         lay.addWidget(AlertBox(
-            "⚠  Execute como Administrador para parar os serviços do Firebird corretamente.",
+            "!  Execute como Administrador para parar os serviços do Firebird corretamente.",
             "warn"
         ))
         lay.addWidget(spacer(h=4))
@@ -279,11 +286,13 @@ class PageAtualizacao(QWidget):
 
         lay.addWidget(spacer(h=8))
 
-        btn_detectar = make_primary_btn("▶  DETECTAR INSTALAÇÕES", 200)
+        btn_detectar = make_primary_btn("DETECTAR INSTALAÇÕES", 200)
         btn_detectar.clicked.connect(self._detectar_pastas)
-        btn_proximo = make_primary_btn("▶  PRÓXIMO", 160)
+        btn_explorar = make_secondary_btn("EXPLORAR", 140)
+        btn_explorar.clicked.connect(self._explorar_pasta)
+        btn_proximo = make_primary_btn("PRÓXIMO", 160)
         btn_proximo.clicked.connect(self._confirm_pasta)
-        lay.addWidget(btn_row(btn_detectar, btn_proximo))
+        lay.addWidget(btn_row(btn_detectar, btn_explorar, btn_proximo))
 
         lay.addStretch()
         return w
@@ -325,6 +334,48 @@ class PageAtualizacao(QWidget):
             self._pasta_rows.append(row)
         if self._pasta_rows:
             self._pasta_sel = pastas[0]
+
+    def _explorar_pasta(self):
+        """Abre o seletor de diretório nativo para o usuário escolher a pasta manualmente."""
+        pasta = QFileDialog.getExistingDirectory(
+            self,
+            "Selecionar pasta de instalação do Futura",
+            "C:\\",
+            QFileDialog.Option.ShowDirsOnly | QFileDialog.Option.DontResolveSymlinks,
+        )
+        if not pasta:
+            return
+
+        # Normaliza separadores para o padrão Windows
+        pasta = pasta.replace("/", "\\")
+
+        # Cancela detecção em andamento, se houver
+        if self._detect_pasta_worker and self._detect_pasta_worker.isRunning():
+            self._detect_pasta_worker.quit()
+            self._detect_pasta_worker.wait(1000)
+        self._pasta_prog.setVisible(False)
+
+        # Remove cards anteriores
+        for row in self._pasta_rows:
+            self._pasta_inner_lay.removeWidget(row)
+            row.deleteLater()
+        self._pasta_rows.clear()
+        if self._pasta_group is not None:
+            self._pasta_group.deleteLater()
+            self._pasta_group = None
+
+        # Cria card com a pasta selecionada manualmente
+        self._pastas = [pasta]
+        self._pasta_group = QButtonGroup(self)
+        card = _PastaCard(pasta, checked=True)
+        self._pasta_group.addButton(card.radio(), 0)
+        self._pasta_inner_lay.addWidget(card)
+        self._pasta_rows.append(card)
+        self._pasta_sel = pasta
+
+        self._pasta_status_lbl.setText("1 pasta selecionada manualmente.")
+        self._pasta_status_lbl.setStyleSheet(f"color: {COLORS['log_ok']};")
+        self._pasta_status_lbl.setVisible(True)
 
     def _confirm_pasta(self):
         if not self._pasta_rows:
@@ -372,12 +423,57 @@ class PageAtualizacao(QWidget):
 
         lay.addWidget(spacer(h=8))
 
-        btn_proximo = make_primary_btn("▶  PRÓXIMO", 160)
+        btn_explorar_banco = make_secondary_btn("EXPLORAR", 140)
+        btn_explorar_banco.clicked.connect(self._explorar_banco)
+        btn_proximo = make_primary_btn("PRÓXIMO", 160)
         btn_proximo.clicked.connect(self._confirm_banco)
-        lay.addWidget(btn_row(btn_proximo))
+        lay.addWidget(btn_row(btn_explorar_banco, btn_proximo))
 
         lay.addStretch()
         return w
+
+    def _explorar_banco(self):
+        """Abre o seletor de arquivo nativo para o usuário escolher o .fdb manualmente."""
+        caminho, _ = QFileDialog.getOpenFileName(
+            self,
+            "Selecionar banco de dados Firebird",
+            "C:\\",  # Sempre abre em C:\
+            "Banco Firebird (*.fdb);;Todos os arquivos (*.*)",
+        )
+        if not caminho:
+            return
+
+        # Normaliza separadores para o padrão Windows
+        caminho = caminho.replace("/", "\\")
+
+        # Cancela detecção em andamento, se houver
+        if self._detect_banco_worker and self._detect_banco_worker.isRunning():
+            self._detect_banco_worker.quit()
+            self._detect_banco_worker.wait(1000)
+        self._banco_prog.setVisible(False)
+
+        # Remove rows anteriores
+        for row in self._banco_rows:
+            self._banco_inner_lay.removeWidget(row)
+            row.deleteLater()
+        self._banco_rows.clear()
+        if self._banco_group is not None:
+            self._banco_group.deleteLater()
+            self._banco_group = None
+
+        # Cria entry com o banco selecionado manualmente
+        self._bancos = [{"caminho": caminho, "status": "Manual", "fonte": "Usuário"}]
+        self._banco_group = QButtonGroup(self)
+        desc = "Status: Manual · Fonte: Usuário"
+        row = RadioRow(caminho, desc, checked=True)
+        self._banco_group.addButton(row.radio(), 0)
+        self._banco_inner_lay.addWidget(row)
+        self._banco_rows.append(row)
+        self._banco_sel = caminho
+
+        self._banco_status_lbl.setText("1 banco selecionado manualmente.")
+        self._banco_status_lbl.setStyleSheet(f"color: {COLORS['log_ok']};")
+        self._banco_status_lbl.setVisible(True)
 
     def _detectar_bancos(self):
         if self._detect_banco_worker and self._detect_banco_worker.isRunning():
@@ -397,7 +493,7 @@ class PageAtualizacao(QWidget):
         except Exception:
             pass
         self._banco_status_lbl.setVisible(False)
-        self._banco_prog.update(0, "Detectando bancos...", f"Buscando .fdb em {self._pasta_sel}")
+        self._banco_prog.update(0, "Detectando bancos...", "Buscando .fdb em C:\\...")
         self._banco_prog.setVisible(True)
         self._detect_banco_worker = _DetectarBancosWorker(self._pasta_sel, self)
         self._detect_banco_worker.finished.connect(
@@ -454,7 +550,7 @@ class PageAtualizacao(QWidget):
         wb_lay = QVBoxLayout(self._warn_box_at)
         wb_lay.setContentsMargins(20, 14, 20, 14)
         wb_lay.setSpacing(4)
-        warn_t = QLabel("⚠  O processo irá:")
+        warn_t = QLabel("O processo irá:")
         warn_t.setFont(QFont(FONT_MONO, 11, QFont.Weight.Bold))
         warn_t.setStyleSheet(f"color: {COLORS['warn']}; background: transparent;")
         wb_lay.addWidget(warn_t)
@@ -499,7 +595,7 @@ class PageAtualizacao(QWidget):
         lay.addWidget(self._resumo_box)
         lay.addWidget(spacer(h=8))
 
-        btn_confirmar = make_primary_btn("✓  CONFIRMAR E ATUALIZAR", 220)
+        btn_confirmar = make_primary_btn("CONFIRMAR E ATUALIZAR", 220)
         btn_confirmar.clicked.connect(self._confirmar_atualizacao)
         lay.addWidget(btn_row(btn_confirmar))
 
@@ -583,7 +679,7 @@ class PageAtualizacao(QWidget):
 
         btns = []
         if not sucesso:
-            btn_retry = make_primary_btn("↺  TENTAR NOVAMENTE", 200)
+            btn_retry = make_primary_btn("TENTAR NOVAMENTE", 200)
             btn_retry.clicked.connect(self.reset)
             btns.append(btn_retry)
         self._done_lay.addWidget(btn_row(*btns))
@@ -594,7 +690,7 @@ class PageAtualizacao(QWidget):
     def _confirmar_atualizacao(self):
         firebird = find_firebird_dir() or "Não detectado"
         dlg = ConfirmDialog(
-            "⚠  Confirmar início da atualização?",
+            "Confirmar início da atualização?",
             [
                 f"Instalação:  {self._pasta_sel}",
                 f"Banco:       {self._banco_sel}",
@@ -660,7 +756,7 @@ class PageAtualizacao(QWidget):
             if callable(action): action()
             else: action.emit()
 
-    # ── TECLADO ───────────────────────────────────────────────────────────────
+    # -- TECLADO ---------------------------------------------------------------
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:

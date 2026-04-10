@@ -11,6 +11,7 @@ import json
 import logging
 import logging.handlers
 import os
+import base64
 from datetime import datetime
 from pathlib import Path
 from PyQt6.QtCore import QObject, pyqtSignal
@@ -39,7 +40,14 @@ class Prefs:
     def _load(self):
         try:
             if self._path.exists():
-                loaded = json.loads(self._path.read_text(encoding="utf-8"))
+                raw = self._path.read_text(encoding="utf-8")
+                # Tenta descriptografar; se falhar, assume que é texto plano (legado)
+                try:
+                    decrypted = self._decrypt(raw)
+                    loaded = json.loads(decrypted)
+                except Exception:
+                    loaded = json.loads(raw)
+
                 # Só aceita se for dict — rejeita JSON corrompido ou de tipo errado
                 if isinstance(loaded, dict):
                     # Valida campos individualmente para não aceitar tipos errados
@@ -66,12 +74,26 @@ class Prefs:
 
     def save(self):
         try:
-            self._path.write_text(
-                json.dumps(self._data, ensure_ascii=False, indent=2),
-                encoding="utf-8"
-            )
+            content = json.dumps(self._data, ensure_ascii=False, indent=2)
+            encrypted = self._encrypt(content)
+            self._path.write_text(encrypted, encoding="utf-8")
         except Exception:
             pass
+
+    def _encrypt(self, data: str) -> str:
+        """Ofuscação básica XOR + Base64."""
+        key = "FUTURA_SALT_2024"
+        xor_data = "".join(chr(ord(c) ^ ord(key[i % len(key)])) for i, c in enumerate(data))
+        return base64.b64encode(xor_data.encode("utf-8")).decode("utf-8")
+
+    def _decrypt(self, data: str) -> str:
+        """Reverte a ofuscação básica."""
+        try:
+            decoded = base64.b64decode(data.encode("utf-8")).decode("utf-8")
+            key = "FUTURA_SALT_2024"
+            return "".join(chr(ord(c) ^ ord(key[i % len(key)])) for i, c in enumerate(decoded))
+        except:
+            return data
 
     # ── Tema ──
 

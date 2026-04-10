@@ -23,7 +23,8 @@ from ui.theme import COLORS, FONT_SANS, FONT_MONO
 from ui.theme_manager import theme_manager
 from ui.widgets import (
     PageHeader, SectionHeader, AlertBox, make_primary_btn, 
-    make_secondary_btn, make_folder_btn, btn_row, spacer, label, h_line
+    make_secondary_btn, make_folder_btn, make_danger_btn,
+    CustomPathCard, btn_row, spacer, label, h_line
 )
 from core.logger import log
 
@@ -84,96 +85,7 @@ def _verificar_status_banco(gstat: str, banco: str) -> str:
         return f"erro: {e}"
 
 
-# ---------------------------------------------------------------------------
-# Helpers de botao
-# ---------------------------------------------------------------------------
-
-def make_danger_btn(text: str, min_width: int = 120) -> QPushButton:
-    btn = QPushButton(text)
-    btn.setMinimumWidth(min_width)
-    btn.setMinimumHeight(35)
-    btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    btn.setFont(QFont(FONT_SANS, 12, QFont.Weight.Bold))
-    _apply_danger(btn)
-    theme_manager.theme_changed.connect(lambda _: _apply_danger(btn))
-    return btn
-
-def _apply_danger(btn: QPushButton):
-    btn.setStyleSheet(f"""
-        QPushButton {{
-            background-color: {COLORS['danger']};
-            color: #ffffff;
-            border: none;
-            border-radius: 6px;
-            padding: 8px 20px;
-            font-weight: 700;
-            font-size: 13px;
-        }}
-        QPushButton:hover {{ background-color: {COLORS['danger']}; opacity: 0.9; }}
-        QPushButton:pressed {{ background-color: {COLORS['danger']}; opacity: 0.8; }}
-        QPushButton:disabled {{
-            background-color: {COLORS['panel_hover']};
-            color: {COLORS['text_disabled']};
-        }}
-    """)
-
-
-# ---------------------------------------------------------------------------
-# Campo .fdb com botao explorer
-# ---------------------------------------------------------------------------
-
-class _PathFieldDB(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(4)
-        self._lbl  = QLabel("Caminho do banco de dados (.fdb)")
-        self._edit = QLineEdit()
-        self._edit.setPlaceholderText(r"Ex: C:\Futura\Dados\DADOS.fdb")
-        self._btn = make_folder_btn(self)
-        self._btn.clicked.connect(self._browse)
-        row = QHBoxLayout()
-        row.setSpacing(4)
-        row.addWidget(self._edit, 1)
-        row.addWidget(self._btn)
-        lay.addWidget(self._lbl)
-        lay.addLayout(row)
-        theme_manager.theme_changed.connect(self._upd)
-        self._upd()
-
-    def _upd(self, _mode: str = ""):
-        self._lbl.setStyleSheet(
-            f"color: {COLORS['text']}; font-size: 10px; font-weight: 600;"
-            f" font-family: {FONT_SANS};"
-        )
-        self._edit.setStyleSheet(f"""
-            QLineEdit {{
-                background: {COLORS['surface']};
-                color: {COLORS['text']};
-                border: 1.5px solid {COLORS['border']};
-                border-radius: 5px;
-                padding: 4px 12px;
-                font-size: 11px;
-            }}
-            QLineEdit:focus {{ border-color: {COLORS['accent']}; }}
-        """)
-
-    def _browse(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Selecionar banco de dados Firebird", "C:\\",
-            "Banco Firebird (*.fdb);;Todos os arquivos (*.*)",
-        )
-        if path:
-            self._edit.setText(os.path.normpath(path))
-
-    @property
-    def value(self) -> str:
-        return self._edit.text().strip()
-
-    @value.setter
-    def value(self, v: str):
-        self._edit.setText(v)
+# Removido _PathFieldDB em favor de CustomPathCard
 
 
 # ---------------------------------------------------------------------------
@@ -333,22 +245,30 @@ class _StepFormulario(QWidget):
         lay.addWidget(self._alert)
 
         lay.addWidget(SectionHeader("Banco de Dados"))
-        self._fld_db = _PathFieldDB()
-        lay.addWidget(self._fld_db)
+        self._card_db = CustomPathCard("Banco de Dados (.fdb)")
+        self._card_db.radio().hide()  # Unico banco, esconde o radio
+        self._card_db.input_field().setPlaceholderText(r"Ex: C:\Futura\Dados\DADOS.fdb")
+        self._card_db.btn_folder().clicked.connect(self._on_browse)
+        lay.addWidget(self._card_db)
 
+        lay.addWidget(spacer(h=8))
         lay.addWidget(SectionHeader("Status do Banco"))
         status_row = QHBoxLayout()
-        self._btn_status = make_secondary_btn("🔍  VERIFICAR STATUS", 148)
+        self._btn_status = make_secondary_btn("🔍  VERIFICAR STATUS", 180)
         self._btn_status.clicked.connect(self._on_verificar_status)
         self._btn_status.setEnabled(bool(self._gstat_path))
-        self._status_badge = label("—", COLORS["text_dim"], 10)
+        
+        # Badge de status mais elegante
+        self._status_badge = QLabel("—")
         self._status_badge.setFont(QFont(FONT_MONO, 10, QFont.Weight.Bold))
-        self._status_badge.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
-        self._atualizar_badge("—")
+        self._status_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._status_badge.setContentsMargins(12, 4, 12, 4)
+        self._status_badge.setFixedHeight(26)
+        
         lay.addWidget(btn_row(self._btn_status, self._status_badge))
 
         lay.addWidget(SectionHeader("Comandos"))
-        for titulo, desc, cor in [
+        for i, (titulo, desc, cor) in enumerate([
             (
                 "Shutdown (full)",
                 "gfix ... -shut full -force 0 localhost:<banco>\nDesconecta todos os usuários imediatamente.",
@@ -359,25 +279,31 @@ class _StepFormulario(QWidget):
                 "gfix ... localhost:<banco> -online\nRetorna o banco ao modo normal de operação.",
                 COLORS["accent2"],
             ),
-        ]:
+        ]):
+            card_id = f"CommandCard_{i}"
             frame = QFrame()
+            frame.setObjectName(card_id)
             frame.setStyleSheet(f"""
-                QFrame {{
+                #{card_id} {{
                     background: {COLORS['surface']};
                     border: 1.5px solid {cor};
-                    border-radius: 6px;
+                    border-radius: 8px;
                 }}
+                #{card_id} QLabel {{ background: transparent; border: none; }}
             """)
             f_lay = QVBoxLayout(frame)
-            f_lay.setContentsMargins(10, 6, 10, 6)
-            f_lay.setSpacing(2)
-            lbl_t = QLabel(titulo)
-            lbl_t.setFont(QFont(FONT_SANS, 10, QFont.Weight.Bold))
-            lbl_t.setStyleSheet(f"color: {cor}; background: transparent;")
+            f_lay.setContentsMargins(16, 10, 16, 10)
+            f_lay.setSpacing(4)
+            
+            lbl_t = QLabel(titulo.upper())
+            lbl_t.setFont(QFont(FONT_SANS, 11, QFont.Weight.Bold))
+            lbl_t.setStyleSheet(f"color: {cor};")
+            
             lbl_d = QLabel(desc)
             lbl_d.setFont(QFont(FONT_MONO, 8))
-            lbl_d.setStyleSheet(f"color: {COLORS['text_dim']}; background: transparent;")
+            lbl_d.setStyleSheet(f"color: {COLORS['text_dim']};")
             lbl_d.setWordWrap(True)
+            
             f_lay.addWidget(lbl_t)
             f_lay.addWidget(lbl_d)
             lay.addWidget(frame)
@@ -403,27 +329,42 @@ class _StepFormulario(QWidget):
 
     def _atualizar_badge(self, status: str):
         mapa = {
-            "online":      ("● Online",      COLORS["accent2"]),
-            "shutdown":    ("● Shutdown",     COLORS["danger"]),
-            "single-user": ("● Single-user",  COLORS["warn"]),
+            "online":      ("●  ONLINE",      COLORS["accent2"]),
+            "shutdown":    ("●  SHUTDOWN",    COLORS["danger"]),
+            "single-user": ("●  SINGLE-USER", COLORS["warn"]),
             "—":           ("—",              COLORS["text_dim"]),
         }
         if status.startswith("erro:"):
-            texto, cor = f"⚠ {status}", COLORS["warn"]
+            texto, cor = f"⚠ ERROR", COLORS["danger"]
         else:
-            texto, cor = mapa.get(status, (f"● {status}", COLORS["text_dim"]))
+            texto, cor = mapa.get(status, (f"●  {status.upper()}", COLORS["text_dim"]))
+        
         self._status_badge.setText(texto)
-        self._status_badge.setStyleSheet(f"color: {cor}; background: transparent;")
+        bg = COLORS["surface2"] if theme_manager.mode == "dark" else COLORS["panel"]
+        self._status_badge.setStyleSheet(f"""
+            color: {cor}; 
+            background: {bg}; 
+            border: 1px solid {COLORS['border']};
+            border-radius: 13px;
+        """)
+
+    def _on_browse(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Selecionar banco de dados Firebird", "C:\\",
+            "Banco Firebird (*.fdb);;Todos os arquivos (*.*)",
+        )
+        if path:
+            self._card_db.set_path(os.path.normpath(path))
 
     def _on_verificar_status(self):
-        if not self._fld_db.value:
+        if not self._card_db.path():
             self._alert.set_text("Informe o caminho do banco de dados.")
             self._alert.set_kind("danger")
             return
         self._btn_status.setEnabled(False)
         self._btn_status.setText("Verificando...")
         self._atualizar_badge("—")
-        self._worker_status = _StatusWorker(self._gstat_path, self._fld_db.value)
+        self._worker_status = _StatusWorker(self._gstat_path, self._card_db.path())
         self._worker_status.concluido.connect(self._on_status_concluido)
         self._worker_status.start()
 
@@ -437,7 +378,7 @@ class _StepFormulario(QWidget):
         self._btn_online.setEnabled(v)
 
     def _on_executar(self, modo: str):
-        if not self._fld_db.value:
+        if not self._card_db.path():
             self._alert.set_text("Informe o caminho do banco de dados.")
             self._alert.set_kind("danger")
             return
@@ -463,7 +404,7 @@ class _StepFormulario(QWidget):
 
     @property
     def banco(self) -> str:
-        return self._fld_db.value
+        return self._card_db.path()
 
     @property
     def gfix(self) -> str:

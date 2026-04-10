@@ -1,7 +1,10 @@
 # =============================================================================
 # FUTURA SETUP — Configurações Centralizadas
-# Todas as constantes e URLs em um só lugar para fácil manutenção
 # =============================================================================
+
+import os
+import json
+from pathlib import Path
 
 # ── VERSÃO ────────────────────────────────────────────────────────────────────
 
@@ -163,3 +166,22 @@ PASTAS_INSTALACAO_PADRAO = [
 
 # Subpasta de backups dentro da instalação
 BACKUP_SUBDIR = "Backup_Atualizacao"
+
+# ── CARREGAMENTO DE CONFIGURAÇÕES EXTERNAS ─────────────────────────────────────
+def _load_external_overrides():
+    """Tenta carregar config_ext.json do diretório atual para sobrescrever constantes."""
+    global URL_DLLS, URL_ATUALIZADOR, MAX_BACKUPS, ESPACO_MIN_MB
+    ext_path = Path("config_ext.json")
+    if ext_path.exists():
+        try:
+            data = json.loads(ext_path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict): return
+            
+            # Sobrescreve constantes globais se presentes no JSON
+            for key, val in data.items():
+                if key in globals():
+                    globals()[key] = val
+        except Exception:
+            pass
+
+_load_external_overrides()

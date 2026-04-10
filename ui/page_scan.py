@@ -474,8 +474,8 @@ class PageScan(QWidget):
         self._server_container = QWidget()
         self._server_container.setStyleSheet("background: transparent;")
         self._server_list_lay  = QVBoxLayout(self._server_container)
-        self._server_list_lay.setContentsMargins(0, 0, 0, 0)
-        self._server_list_lay.setSpacing(8)
+        self._server_list_lay.setContentsMargins(4, 4, 4, 16)
+        self._server_list_lay.setSpacing(12)
         self._server_list_lay.addStretch()
         scroll.setWidget(self._server_container)
         lay.addWidget(scroll, 1)  # stretch=1 — ocupa todo espaço restante
