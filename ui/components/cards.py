@@ -360,3 +360,59 @@ class CustomPathCard(QWidget):
             }}
             QLabel {{ background: transparent; border: none; color: {COLORS['text']}; }}
         """)
+
+class PathSelectorCard(QWidget):
+    """Card reutilizável para seleção de arquivos ou diretórios com estética v5.0."""
+    def __init__(self, label_text: str, placeholder: str = "", is_dir: bool = True, parent=None):
+        super().__init__(parent)
+        self.is_dir = is_dir
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
+        
+        self.lbl = label(label_text, COLORS["text"], 9, bold=True)
+        lay.addWidget(self.lbl)
+        
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        
+        self.edit = QLineEdit()
+        self.edit.setPlaceholderText(placeholder)
+        self.edit.setFixedHeight(34)
+        
+        self.btn = make_folder_btn(self)
+        self.btn.clicked.connect(self._browse)
+        
+        row.addWidget(self.edit, 1)
+        row.addWidget(self.btn)
+        lay.addLayout(row)
+        
+        self._upd()
+        theme_manager.theme_changed.connect(self._upd)
+
+    def _upd(self, _mode=""):
+        self.edit.setStyleSheet(f"""
+            QLineEdit {{
+                background: {COLORS['surface']};
+                color: {COLORS['text']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 6px;
+                padding: 4px 12px;
+                font-size: 11px;
+            }}
+            QLineEdit:focus {{ border-color: {COLORS['accent']}; }}
+        """)
+
+    def _browse(self):
+        from PyQt6.QtWidgets import QFileDialog
+        curr = self.edit.text() or "C:\\"
+        if self.is_dir:
+            p = QFileDialog.getExistingDirectory(self, "Selecionar Pasta", curr)
+        else:
+            p, _ = QFileDialog.getOpenFileName(self, "Selecionar Arquivo", curr, "Todos (*.*)")
+        if p: self.edit.setText(p.replace("/", "\\"))
+
+    @property
+    def value(self) -> str: return self.edit.text().strip()
+    @value.setter
+    def value(self, v: str): self.edit.setText(v)

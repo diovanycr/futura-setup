@@ -43,17 +43,39 @@ class LogConsole(QTextEdit):
 class FadeStackedWidget(QStackedWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._offset_y = 0
+        self._anim_group = QPropertyAnimation(self, b"offset_y")
+        self._anim_group.setDuration(350)
+        self._anim_group.setEasingCurve(QEasingCurve.Type.OutCubic)
+        
         self._opacity_anim = QPropertyAnimation(self, b"windowOpacity")
-        self._opacity_anim.setDuration(250)
+        self._opacity_anim.setDuration(300)
         self._opacity_anim.setStartValue(0.0)
         self._opacity_anim.setEndValue(1.0)
         self._opacity_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
 
+    @pyqtProperty(int)
+    def offset_y(self): return self._offset_y
+    @offset_y.setter
+    def offset_y(self, v): self._offset_y = v; self.update()
+
     def setCurrentIndex(self, index):
         if index == self.currentIndex(): return
         super().setCurrentIndex(index)
+        
+        self._offset_y = 12
+        self._anim_group.stop()
+        self._anim_group.setStartValue(12)
+        self._anim_group.setEndValue(0)
+        self._anim_group.start()
+        
         self._opacity_anim.stop()
         self._opacity_anim.start()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        if self._offset_y != 0: p.translate(0, self._offset_y)
+        super().paintEvent(event)
 
 class BusyOverlay(QWidget):
     def __init__(self, parent: QWidget):
@@ -113,3 +135,29 @@ class BusyOverlay(QWidget):
                 self._message
             )
         painter.end()
+
+
+class BlurOverlay(QWidget):
+    """
+    Overlay que aplica um efeito de desfoque suave ao widget pai.
+    Ideal para diálogos e modais "premium".
+    """
+    def __init__(self, parent: QWidget):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.WindowType.Widget)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+        self.hide()
+
+    def show_event(self, event):
+        self.resize(self.parentWidget().size())
+        self.raise_()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        # Camada de vidro (blur simulado com cor semi-transparente + overlay)
+        r, g, b = hex_to_rgb(COLORS["bg"])
+        p.fillRect(self.rect(), QColor(r, g, b, 160))
+        
+        # Se o tema for escuro, adicionamos um toque de profundidade
+        if theme_manager.mode == "dark":
+            p.fillRect(self.rect(), QColor(0, 0, 0, 40))

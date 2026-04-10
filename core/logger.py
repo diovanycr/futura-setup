@@ -155,6 +155,15 @@ class Prefs:
         self._data["portas_hist"] = hist[:self._MAX_HIST]
         self.save()
 
+    @property
+    def last_backup(self) -> str:
+        return self._data.get("last_backup", "Nenhum")
+
+    @last_backup.setter
+    def last_backup(self, value: str):
+        self._data["last_backup"] = value
+        self.save()
+
 
 # ── LOGGER ────────────────────────────────────────────────────────────────────
 

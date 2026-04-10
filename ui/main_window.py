@@ -10,6 +10,7 @@ from ui.theme import COLORS, get_stylesheet
 from ui.theme_manager import theme_manager
 from ui.widgets import FadeStackedWidget, WorkerGuardDialog
 from ui.components.sidebar import Sidebar
+from ui.components.search import SearchOverlay
 from ui.navigation_manager import (
     NavigationManager, IDX_MENU, IDX_SCAN, IDX_ATALHOS, IDX_TERMINAL, 
     IDX_UTILITARIOS, IDX_LOG, IDX_RESTAURAR, IDX_ATUALIZACAO,
@@ -46,6 +47,9 @@ class MainWindow(QMainWindow):
         self._nav = NavigationManager(self._stack, self._sidebar)
         self._controller = AppController(self._nav, self._sidebar)
 
+        # ── Global Search Overlay ───────────────────────────────────────────
+        self._search = SearchOverlay(self._nav, self)
+
         # ── Conexão de Eventos ──────────────────────────────────────────────
         self._setup_connections()
         self._setup_shortcuts()
@@ -69,6 +73,10 @@ class MainWindow(QMainWindow):
         self._sidebar.nav_terminal.on_click(
             lambda: self._navigate(lambda: self._nav.show_page(IDX_TERMINAL))
         )
+        
+        # Conexões de Busca
+        self._sidebar.search_bar.mousePressEvent = lambda _: self._on_search_triggered()
+        self._search.result_selected.connect(self._on_search_result)
 
         # Conexões Dinâmicas (Signals das páginas)
         # O NavigationManager emite um sinal toda vez que uma página muda/é criada
@@ -77,7 +85,15 @@ class MainWindow(QMainWindow):
     def _setup_shortcuts(self):
         """Configura atalhos globais do sistema."""
         self._sc_search = QShortcut(QKeySequence("Ctrl+K"), self)
-        self._sc_search.activated.connect(self._sidebar.search_bar.setFocus)
+        self._sc_search.activated.connect(self._on_search_triggered)
+
+    def _on_search_triggered(self):
+        """Ativado via Ctrl+K ou clique na barra da sidebar."""
+        self._search.show_search()
+
+    def _on_search_result(self, idx):
+        """Navega para a página selecionada na busca."""
+        self._nav.show_page(idx)
 
     def _on_page_ready(self, idx, page):
         """Conecta sinais específicos de cada página quando elas são instanciadas."""

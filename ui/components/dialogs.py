@@ -2,9 +2,12 @@
 # FUTURA SETUP — UI Components: Dialogs
 # =============================================================================
 
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QWidget
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont
+from PyQt6.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
+    QComboBox, QTimeEdit, QWidget
+)
+from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QTime
+from PyQt6.QtGui import QFont, QColor
 
 from ui.theme import COLORS, FONT_SANS
 from ui.theme_manager import theme_manager
@@ -90,3 +93,89 @@ class WorkerGuardDialog(QWidget):
     def _upd(self, _mode: str = ""):
         self.setStyleSheet(f"QWidget#box {{ background: {COLORS['surface']}; border: 1.5px solid {COLORS['warn']}; border-radius: 10px; }} "
                            f"QLabel {{ color: {COLORS['text']}; background: transparent; }}")
+
+class BackupScheduleDialog(QDialog):
+    """Diálogo premium para agendamento de backup via GBAK."""
+    def __init__(self, parent=None, task_exists: bool = False):
+        super().__init__(parent)
+        self.setWindowTitle("Agendar Backup")
+        self.setFixedWidth(400)
+        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        
+        self.res = None
+        
+        lay = QVBoxLayout(self)
+        self.container = QFrame()
+        self.container.setObjectName("dialogCard")
+        lay.addWidget(self.container)
+        
+        c_lay = QVBoxLayout(self.container)
+        c_lay.setContentsMargins(24, 24, 24, 24)
+        c_lay.setSpacing(16)
+        
+        from ui.components.base import label
+        title = label("AGENDAR BACKUP", COLORS["accent"], 11, bold=True)
+        c_lay.addWidget(title)
+        
+        desc = label("Escolha a frequência e o horário para o backup automático do banco de dados.", COLORS["text_dim"], 10)
+        desc.setWordWrap(True)
+        c_lay.addWidget(desc)
+
+        # Frequência
+        self.freq_combo = QComboBox()
+        self.freq_combo.addItems(["DIÁRIO", "SEMANAL", "MENSAL"])
+        c_lay.addWidget(label("FREQUÊNCIA", COLORS["text_dim"], 8, bold=True))
+        c_lay.addWidget(self.freq_combo)
+
+        # Horário
+        self.time_edit = QTimeEdit()
+        self.time_edit.setTime(QTime(2, 0))
+        self.time_edit.setDisplayFormat("HH:mm")
+        c_lay.addWidget(label("HORÁRIO", COLORS["text_dim"], 8, bold=True))
+        c_lay.addWidget(self.time_edit)
+
+        if task_exists:
+            warn = label("⚠️ Já existe uma tarefa agendada que será substituída.", COLORS["warn"], 9)
+            warn.setWordWrap(True)
+            c_lay.addWidget(warn)
+
+        c_lay.addSpacing(10)
+        
+        btns = QHBoxLayout()
+        btn_cancel = make_secondary_btn("CANCELAR", 120)
+        btn_confirm = make_primary_btn("CONFIRMAR", 120)
+        
+        btn_cancel.clicked.connect(self.reject)
+        btn_confirm.clicked.connect(self._on_ok)
+        
+        btns.addWidget(btn_cancel)
+        btns.addWidget(btn_confirm)
+        c_lay.addLayout(btns)
+        
+        self._upd()
+        theme_manager.theme_changed.connect(self._upd)
+
+    def _on_ok(self):
+        freq_map = {0: "DAILY", 1: "WEEKLY", 2: "MONTHLY"}
+        self.res = {
+            "freq": freq_map[self.freq_combo.currentIndex()],
+            "time": self.time_edit.time().toString("HH:mm")
+        }
+        self.accept()
+
+    def _upd(self, _mode=""):
+        self.container.setStyleSheet(f"""
+            QFrame#dialogCard {{
+                background: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 12px;
+            }}
+            QComboBox, QTimeEdit {{
+                background: {COLORS['bg']};
+                color: {COLORS['text']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                padding: 4px;
+            }}
+        """)

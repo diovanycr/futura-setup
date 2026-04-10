@@ -153,3 +153,24 @@ class NavigationManager(QObject):
     def get_nav_item(self, idx: int):
         """Retorna o NavItem da sidebar associado a um índice de página."""
         return self._nav_map.get(idx)
+
+    def get_searchable_entries(self) -> list[dict]:
+        """Retorna lista de entradas formatadas para o Global Search."""
+        return [
+            {"title": "Menu Principal", "idx": IDX_MENU, "tags": "home inicio dashboard"},
+            {"title": "Puxar via Rede (Atalhos)", "idx": IDX_ATALHOS, "tags": "rede server servidor atalhos"},
+            {"title": "Configurar Novo Terminal", "idx": IDX_TERMINAL, "tags": "copiar arquivos terminal terminal autonomo"},
+            {"title": "Atualizar ERP Futura", "idx": IDX_ATUALIZACAO, "tags": "update baixar versao nova erp"},
+            {"title": "Instalar Firebird (Instalador Oficial)", "idx": IDX_INSTALAR_FIREBIRD, "tags": "fb3 fb4 download instalar servico"},
+            {"title": "Firebird Portable (Gerenciador)", "idx": IDX_FB_PORTABLE, "tags": "portable independente multi versao"},
+            {"title": "Backup GBAK (Segurança)", "idx": IDX_BACKUP_GBAK, "tags": "backup gbak segurança dados dump"},
+            {"title": "Restaurar Backup (Recuperação)", "idx": IDX_RESTAURAR, "tags": "restore restaurar recuperar dados"},
+            {"title": "Liberar Portas (Firewall)", "idx": IDX_PORT_OPENER, "tags": "firewall portas 3050 network rede"},
+            {"title": "Diagnóstico de Sistema", "idx": IDX_DIAGNOSTICO, "tags": "check saude erros sistema logs"},
+            {"title": "Visualizar Logs do Setup", "idx": IDX_LOG, "tags": "log historico depuracao"},
+            {"title": "Shutdown / Online (Firebird)", "idx": IDX_SHUTDOWN_ONLINE, "tags": "gfix fechar conexoes online derrubar"},
+            {"title": "Verificar Versão de Banco (.fdb)", "idx": IDX_VERIFICAR_VERSAO_FDB, "tags": "fdb ods versao firebird"},
+            {"title": "Editar Funcionário Admin", "idx": IDX_EDITAR_FUNC, "tags": "senha admin config usuario"},
+            {"title": "Implantar Futura Mobile", "idx": IDX_IMPLANTAR_MOBILE, "tags": "mobile celular tablet android"},
+            {"title": "Utilitários Extras", "idx": IDX_UTILITARIOS, "tags": "ferramentas ferramentas gfix gbak"},
+        ]
